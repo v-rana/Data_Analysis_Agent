@@ -1,0 +1,2 @@
+Give valid sql based on this query
+user query: {user_input}
