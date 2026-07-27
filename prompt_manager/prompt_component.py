@@ -1,7 +1,6 @@
 import os
-from typing import Union, Optional
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 
 
@@ -15,10 +14,11 @@ def read_prompt(p_name: str) -> str:
     return prompt.strip()
 
 # function to get the full prompt template
-def get_prompt_template(system_prompt_name:str,user_template_name: str ) -> ChatPromptTemplate:
-    system_prompt = read_prompt(system_prompt_name)
+def get_prompt_template(sys_p_name:str,user_template_name: str ) -> ChatPromptTemplate:
+    system_prompt = read_prompt(sys_p_name)
     user_prompt_template = read_prompt(user_template_name)
     messages = [ ('system',system_prompt) , 
+                MessagesPlaceholder(variable_name="chat_history"),
                 ('user',user_prompt_template)]
     
     template = ChatPromptTemplate.from_messages(messages)

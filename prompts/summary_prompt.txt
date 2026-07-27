@@ -1,0 +1,2 @@
+Previous summary: {summary}New messages to add to summary:
+{messages_to_summarize} Create a concise summary preserving key technical details and decisions.
