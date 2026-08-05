@@ -19,16 +19,11 @@ class HybridChatMessageHistory(InMemoryChatMessageHistory):
     
     def add_messages(self,message):
         super().add_messages(message)
-        print("*"*60)
-        for message in self.messages:
-            print(message.content if message.content else message.text)
-        print("*"*60)
 
         if  len(self.messages) < self._max_size:
             return 
 
         print("summarization....")
-        # self._summary = self._summarize_last_messages()
         messages_to_summarize = self.messages[:-self._buffer_size]
         summary_prompt = f"""Previous summary: {self._summary}New messages to add to summary:
 {self._format_messages(messages_to_summarize)} Create a concise summary preserving key technical details and decisions."""
@@ -64,7 +59,7 @@ class HybridChatMessageHistory(InMemoryChatMessageHistory):
         for msg in messages:
             role = "Human" if isinstance(msg, HumanMessage) else "AI"
             formatted.append(f"{role}: {msg.content}")
-        print("formatted messages: ",formatted)
+
         return "\n".join(formatted)
     
 
