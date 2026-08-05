@@ -44,9 +44,8 @@ class QueryRequest(BaseModel):
 
 @app.post("/query_agent")
 async def query_agent(query:QueryRequest,db: AsyncSession = Depends(get_session)):
-
-    result = await execute_sql_agent(db,query.session_id,query.schema_name,
-                                     query.table_name, query.user_input)
-    
+    result = await execute_sql_agent(db, query.schema_name, 
+                                     query.table_name, query.user_input,
+                                       query.session_id)
     return result
 
