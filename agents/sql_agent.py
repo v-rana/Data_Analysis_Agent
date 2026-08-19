@@ -3,8 +3,13 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from prompt_manager.prompt_component import sql_agent_prompt_template
 from llm.llm_obj import llm
 from llm_memory.memory_handler import get_hybrid_session_history
+from helper.logger import AppLogger
 
 
+
+logger = AppLogger(__name__)
+
+@logger()
 def build_sql_agent(llm, system_prompt_name: str, user_prompt_name: str):
     prompt = sql_agent_prompt_template(system_prompt_name, user_prompt_name)
     chain = prompt | llm

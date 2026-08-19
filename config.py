@@ -1,6 +1,10 @@
+import logging
+
 from pydantic_settings import BaseSettings
 from pydantic import computed_field
 from urllib.parse import quote_plus
+
+logging.basicConfig(level=logging.INFO)
 
 class Settings(BaseSettings):
     APP_NAME: str = "sql_agent"

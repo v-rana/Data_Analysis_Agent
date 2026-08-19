@@ -3,9 +3,13 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from prompt_manager.prompt_component import debugger_agent_prompt_template
 from llm.llm_obj import llm
 from llm_memory.memory_handler import get_hybrid_session_history
+from helper.logger import AppLogger
 
 from models import RepairAttempt
 
+logger = AppLogger(__name__)
+
+@logger()
 def build_debugger_agent(llm, prompt_name):
     prompt = debugger_agent_prompt_template(prompt_name)
     chain = prompt | llm
@@ -20,6 +24,7 @@ def build_debugger_agent(llm, prompt_name):
 _AGENT = build_debugger_agent(llm, "debug_agent_sys_prompt")
 
 
+@logger(log_result=True)
 async def execute_debugger_agent(
     session_id: str,
     current_query: str,

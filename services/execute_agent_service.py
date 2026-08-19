@@ -15,9 +15,13 @@ from agents.debugger_agent import execute_debugger_agent
 from validation.pipeline import run_pipeline
 
 from db.execute_sql import execute_sql_query
+from helper.logger import AppLogger
 
 MAX_RETRIES = 2
+logger = AppLogger(__name__)
 
+
+@logger(log_result=True)
 async def execute_sql_agent(
     db: AsyncSession,
     schema_name: str,

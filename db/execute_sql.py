@@ -3,7 +3,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import AgentResult, QueryStatus
+from helper.logger import AppLogger
 
+logger = AppLogger(__name__)
+
+
+@logger(log_result=True)
 async def execute_sql_query(
     result: AgentResult,
     db: AsyncSession,
