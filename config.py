@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY : str
     GOOGLE_API_KEY: str
     LOG_LEVEL: str = "INFO"
+    LOG_RESULT_DETAILS: bool = False
+    LOG_INPUT_DETAILS: bool = False
     
     @computed_field
     @property
