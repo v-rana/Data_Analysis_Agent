@@ -21,6 +21,20 @@ MAX_RETRIES = 2
 logger = AppLogger(__name__)
 
 
+async def _run_sql_with_error_mapping(
+    result: AgentResult,
+    db: AsyncSession,
+) -> AgentResult:
+    try:
+        result.rows = await execute_sql_query(result.sql, db)
+        return result
+    except Exception as exc:
+        result.status = QueryStatus.EXECUTION_FAILED
+        result.execution_error = str(exc)
+        result.execution_error_type = type(exc).__name__
+        return result
+
+
 @logger(log_result=True)
 async def execute_sql_agent(
     db: AsyncSession,
@@ -29,57 +43,60 @@ async def execute_sql_agent(
     user_input: str,
     session_id: str,
 ) -> AgentResult:
+    try:
+        table_schema = await fetch_tbl_attr(
+            db,
+            schema_name,
+            [tbl_name],
+        )
+        raw_json_context = await build_table_context(db, schema_name, tbl_name)
+        additional_context = format_table_context(raw_json_context)
 
-    table_schema = await fetch_tbl_attr(
-        db,
-        schema_name,
-        [tbl_name],
-    )
-    raw_json_context = await build_table_context(db, schema_name, tbl_name)
-    additional_context = format_table_context(raw_json_context)
-
-    sql_query = await generate_sql_query(
-        session_id=session_id,
-        schema_name=schema_name,
-        table_name=tbl_name,
-        user_input=user_input,
-        table_schema=table_schema,
-        additional_context=additional_context,
-    )
-
-    print("-" * 30)
-    print("RETURNED SQL QUERY:", sql_query)
-    print("-" * 30)
-
-    result = run_pipeline(sql_query, dialect="postgres")
-
-    if result.status == QueryStatus.VALIDATION_FAILED:
-        return result
-
-    result = await execute_sql_query(result, db)
-    cur_retry = 0
-    debug_history = []
-
-    while result.status == QueryStatus.EXECUTION_FAILED and cur_retry < MAX_RETRIES:
-        print(f"CURRENT RETRY: {cur_retry} LEVEL")
-        repaired_sql = await execute_debugger_agent(
-            session_id,
-            result.sql,
-            f"{result.execution_error_type}:{result.execution_error}",
-            table_schema,
-            debug_history,
+        sql_query = await generate_sql_query(
+            session_id=session_id,
+            schema_name=schema_name,
+            table_name=tbl_name,
+            user_input=user_input,
+            table_schema=table_schema,
+            additional_context=additional_context,
         )
 
-        print(f"PREVIOUS SQL: {result.sql}\nNEW SQL:{repaired_sql}")
+        print("-" * 30)
+        print("RETURNED SQL QUERY:", sql_query)
+        print("-" * 30)
 
-        repaired_result = run_pipeline(repaired_sql, dialect="postgres")
+        result = run_pipeline(sql_query, dialect="postgres")
 
-        if repaired_result.status == QueryStatus.VALIDATION_FAILED:
-            return repaired_result
+        if result.status == QueryStatus.VALIDATION_FAILED:
+            return result
 
-        repaired_result.rows = await execute_sql_query(repaired_result.sql, db)
-        result = repaired_result
-        debug_history.append(RepairAttempt(sql=result.sql, error=result.execution_error or ""))
-        cur_retry += 1
+        result = await _run_sql_with_error_mapping(result, db)
+        cur_retry = 0
+        debug_history = []
 
-    return result
+        while result.status == QueryStatus.EXECUTION_FAILED and cur_retry < MAX_RETRIES:
+            print(f"CURRENT RETRY: {cur_retry} LEVEL")
+            repaired_sql = await execute_debugger_agent(
+                session_id,
+                result.sql,
+                f"{result.execution_error_type}:{result.execution_error}",
+                table_schema,
+                debug_history,
+            )
+
+            print(f"PREVIOUS SQL: {result.sql}\nNEW SQL:{repaired_sql}")
+
+            repaired_result = run_pipeline(repaired_sql, dialect="postgres")
+
+            if repaired_result.status == QueryStatus.VALIDATION_FAILED:
+                return repaired_result
+
+            repaired_result = await _run_sql_with_error_mapping(repaired_result, db)
+            result = repaired_result
+            debug_history.append(RepairAttempt(sql=result.sql, error=result.execution_error or ""))
+            cur_retry += 1
+
+        return result
+    except Exception:
+        logger._logger.exception("Unhandled failure in execute_sql_agent")
+        raise

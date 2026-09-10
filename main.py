@@ -1,4 +1,5 @@
 from fastapi import FastAPI ,Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.conn import get_session
@@ -7,6 +8,14 @@ from db.fetch_context import fetch_tables_under_schema,fetch_tbl_attr,fetch_fiel
 from services.execute_agent_service import execute_sql_agent
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 tbl_names = ["air_traffic_passenger_statistics_20260718"]
 @app.get("/health")

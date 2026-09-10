@@ -10,20 +10,13 @@ logger = AppLogger(__name__)
 
 @logger(log_result=True)
 async def execute_sql_query(
-    result: AgentResult,
+    sql: str,
     db: AsyncSession,
-) -> AgentResult:
+) -> dict:
+    query_result = await db.execute(
+        text(sql)
+    )
 
-    try:
-        query_result = await db.execute(
-            text(result.sql)
-        )
+    rows = query_result.mappings().all()
 
-        result.rows = query_result.mappings().all()
-
-    except Exception as exc:
-        result.status = QueryStatus.EXECUTION_FAILED
-        result.execution_error = str(exc)
-        result.execution_error_type = type(exc).__name__
-    
-    return result
+    return rows
