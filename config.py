@@ -8,14 +8,18 @@ logging.basicConfig(level=logging.INFO)
 
 class Settings(BaseSettings):
     APP_NAME: str = "sql_agent"
-    
+
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
     POSTGRES_HOST: str
     POSTGRES_PORT: int
-    OPENAI_API_KEY : str
+    OPENAI_API_KEY: str
     GOOGLE_API_KEY: str
+
+    AUTH_ENABLED: bool = False
+    AUTH_TOKEN: str = "change-me"
+
     LOG_LEVEL: str = "INFO"
     LOG_RESULT_DETAILS: bool = False
     LOG_INPUT_DETAILS: bool = False
