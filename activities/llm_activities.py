@@ -12,7 +12,6 @@ async def generate_sql_activity(context: SQLContext) -> str:
         schema_name=context.schema_name,
         table_name=context.table_name,
         user_input=context.user_input,
-        table_schema=context.table_schema,
     )
 
 

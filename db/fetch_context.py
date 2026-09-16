@@ -1,11 +1,22 @@
 from typing import Any
-from sqlalchemy import (inspect,MetaData, Table, func,select)
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,)
+
+from sqlalchemy import (
+    MetaData,
+    Table,
+    inspect,
+    select,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.sqltypes import String
+from helper.logger import AppLogger
+
+logger = AppLogger(__name__)
+
+MAX_DISTINCT_VALUES = 30
 
 
 async def fetch_tables_under_schema(db_conn: AsyncSession,schema: str) -> list[str]:
+    logger._logger.info("Listing tables for schema: %s", schema)
     #using the inspect function to get the table names directly
     conn = await db_conn.connection()
 
@@ -15,175 +26,106 @@ async def fetch_tables_under_schema(db_conn: AsyncSession,schema: str) -> list[s
     async with conn.begin():
         return await conn.run_sync(_get_tables)
 
-
-async def fetch_tbl_attr(db_conn: AsyncSession ,schema_name:str,
-                         tbl_names: list[str]) -> dict[dict]:
-    conn = await db_conn.connection()
-    def _get_table_attrs(sync_conn):
-        inspector = inspect(sync_conn)
-
-        result = {}
-
-        for table in tbl_names:
-            columns = inspector.get_columns(
-                table_name=table,
-                schema=schema_name,
-            )
-
-            pk = inspector.get_pk_constraint(
-                table_name=table,
-                schema=schema_name,
-            )
-
-            result[table] = {
-                "columns": [
-                    {
-                        "name": col["name"],
-                        "type": str(col["type"]),
-                        "nullable": col["nullable"],
-                    }
-                    for col in columns
-                ],
-                "primary_keys": pk.get("constrained_columns", []),
-            }
-
-        return result
-
-    return await conn.run_sync(_get_table_attrs)
-
-
-MAX_DISTINCT_VALUES = 30
-
-SAMPLE_SIZE = 10
-
-
-async def _load_table(
-    db_conn: AsyncSession,
+async def load_table(
+    db: AsyncSession,
     schema_name: str,
-    tbl_name: str,
-) -> Table:
+    table_name: str,
+) -> tuple[Table, set[str]]:
+    logger._logger.info("Reflecting table: %s.%s", schema_name, table_name)
+
     metadata = MetaData()
 
-    def _reflect_table(sync_conn):
-        return Table(
-            tbl_name,
+    def _load(sync_conn):
+        table = Table(
+            table_name,
             metadata,
             schema=schema_name,
             autoload_with=sync_conn,
         )
 
-    conn = await db_conn.connection()
-    return await conn.run_sync(_reflect_table)
+        inspector = inspect(sync_conn)
 
-
-async def _fetch_field_summary(
-    db_conn: AsyncSession,
-    table: Table,
-    field_name: str,
-) -> dict[str, Any]:
-
-    col = table.c[field_name]
-
-    distinct_count = await db_conn.scalar(
-        select(func.count(col.distinct()))
-    )
-
-    if distinct_count <= MAX_DISTINCT_VALUES:
-        rows = await db_conn.execute(
-            select(col).distinct()
+        pk = inspector.get_pk_constraint(
+            table_name=table_name,
+            schema=schema_name,
         )
 
-        return {
-            "distinct_count": distinct_count,
-            "values": [row[0] for row in rows.fetchall()],
-        }
-
-    rows = await db_conn.execute(
-        select(col)
-        .distinct()
-        .limit(SAMPLE_SIZE)
-    )
-
-    return {
-        "distinct_count": distinct_count,
-        "sample_values": [row[0] for row in rows.fetchall()],
-    }
-
-
-async def fetch_field_details(
-    db_conn: AsyncSession,
-    schema_name: str,
-    tbl_name: str,
-    field_names: list[str],
-) -> dict[str, dict[str, Any]]:
-
-    table = await _load_table(
-        db_conn,
-        schema_name,
-        tbl_name,
-    )
-
-    result: dict[str, dict[str, Any]] = {}
-
-    for field in field_names:
-        if field not in table.c:
-            continue
-
-        result[field] = await _fetch_field_summary(
-            db_conn,
+        return (
             table,
-            field,
+            set(pk.get("constrained_columns", [])),
         )
 
+    conn = await db.connection()
+
+    result = await conn.run_sync(_load)
+    logger._logger.info("Reflected table: %s.%s", schema_name, table_name)
     return result
 
 
+async def get_column_values(
+    db: AsyncSession,
+    column,
+) -> list[Any]:
+    logger._logger.info("Loading distinct values for column: %s", column.name)
+
+    rows = await db.execute(
+        select(column)
+        .where(column.is_not(None))
+        .distinct()
+        .limit(MAX_DISTINCT_VALUES + 1)
+    )
+
+    values = [
+        row[0]
+        for row in rows.fetchall()
+        if row[0] is not None
+    ]
+
+    if len(values) > MAX_DISTINCT_VALUES:
+        return []
+
+    logger._logger.info("Loaded %d distinct values for column: %s", len(values), column.name)
+    return values
+
+
 async def build_table_context(
-    db_conn: AsyncSession,
+    db: AsyncSession,
     schema_name: str,
-    tbl_name: str,
+    table_name: str,
 ) -> dict[str, Any]:
+    logger._logger.info("Building table context: %s.%s", schema_name, table_name)
 
-    metadata = MetaData()
+    table, primary_keys = await load_table(
+        db,
+        schema_name,
+        table_name,
+    )
 
-    def _load_table(sync_conn):
-        return Table(
-            tbl_name,
-            metadata,
-            schema=schema_name,
-            autoload_with=sync_conn,
-        )
-
-    conn = await db_conn.connection()
-    table = await conn.run_sync(_load_table)
-
-    context: dict[str, Any] = {
-        "table_name": tbl_name,
+    context = {
+        "schema_name": schema_name,
+        "table_name": table_name,
         "columns": {},
     }
 
-    for col in table.columns:
+    for column in table.columns:
 
-        col_info: dict[str, Any] = {
-            "type": str(col.type),
-            "nullable": col.nullable,
+        column_info = {
+            "type": str(column.type),
+            "nullable": column.nullable,
+            "is_primary_key": column.name in primary_keys,
         }
 
-        if not isinstance(col.type, String):
-            continue
+        if isinstance(column.type, String):
 
-        rows = await db_conn.execute(
-            select(col)
-            .where(col.is_not(None))
-            .distinct()
-            .limit(MAX_DISTINCT_VALUES)
-        )
+            values = await get_column_values(
+                db,
+                column,
+            )
 
-        values = [row[0] for row in rows.fetchall()]
+            if values:
+                column_info["values"] = values
 
-        if values:
-            col_info["values"] = values
+        context["columns"][column.name] = column_info
 
-        context["columns"][col.name] = col_info
-
+    logger._logger.info("Built table context: %s.%s", schema_name, table_name)
     return context

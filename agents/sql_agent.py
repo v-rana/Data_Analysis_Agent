@@ -30,14 +30,12 @@ async def execute_sql_agent(
     schema_name: str,
     table_name: str,
     user_input: str,
-    table_schema: str = "",
     additional_context: str = "",
 ) -> str:
     params = {
         "schema_name": schema_name,
         "table_name": table_name,
         "user_input": user_input,
-        "table_schema": table_schema,
         "additional_context": additional_context,
     }
     config = {

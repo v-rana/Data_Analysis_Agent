@@ -1,7 +1,6 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from db.fetch_context import (fetch_tables_under_schema,
-                              fetch_tbl_attr,fetch_field_details)
+from db.fetch_context import (fetch_tables_under_schema)
 from db.conn import get_session
 
 @pytest.mark.asyncio
@@ -14,12 +13,6 @@ async def test_get_tables(db_conn: AsyncSession):
     assert all(isinstance(table, str) for table in result)
     assert "test_tbl" in result
 
-async def test_tbl_attr():
-    session = get_session()
-    result = await fetch_tbl_attr(session,"public",["air_traffic_passenger_statistics_20260718"])
-    print(result)
-
-test_tbl_attr()
 
 
 #test fetch field details

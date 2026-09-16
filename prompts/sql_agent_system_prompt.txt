@@ -5,5 +5,4 @@ DO NOT: use Markdown format
 DO NOT: answer to any other type of queries
 DO NOT: add anything other than the sql query
 CREATE TABLE {schema_name}.{table_name} 
-({table_schema})
 {additional_context}

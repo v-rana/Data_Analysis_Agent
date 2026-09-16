@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.fetch_context import fetch_tbl_attr, build_table_context
+from db.fetch_context import  build_table_context
 
 from models import (AgentResult, QueryStatus, RepairAttempt)
 
@@ -12,6 +12,8 @@ from helper.format_context import format_table_context
 
 from agents.sql_agent import execute_sql_agent as generate_sql_query
 from agents.debugger_agent import execute_debugger_agent
+
+from cache.table_context import table_context_cache
 from validation.pipeline import run_pipeline
 
 from db.execute_sql import execute_sql_query
@@ -44,20 +46,24 @@ async def execute_sql_agent(
     session_id: str,
 ) -> AgentResult:
     try:
-        table_schema = await fetch_tbl_attr(
-            db,
-            schema_name,
-            [tbl_name],
+        table_context = await table_context_cache.get_or_build(
+            key=(schema_name, tbl_name),
+            builder=lambda: build_table_context(
+                db,
+                schema_name,
+                tbl_name,
+            ),
         )
-        raw_json_context = await build_table_context(db, schema_name, tbl_name)
-        additional_context = format_table_context(raw_json_context)
+
+        additional_context = format_table_context(
+            table_context
+        )
 
         sql_query = await generate_sql_query(
             session_id=session_id,
             schema_name=schema_name,
             table_name=tbl_name,
             user_input=user_input,
-            table_schema=table_schema,
             additional_context=additional_context,
         )
 
@@ -80,7 +86,7 @@ async def execute_sql_agent(
                 session_id,
                 result.sql,
                 f"{result.execution_error_type}:{result.execution_error}",
-                table_schema,
+                str(table_context),
                 debug_history,
             )
 

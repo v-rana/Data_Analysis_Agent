@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.simple_auth import AuthMiddleware, SimpleAuthService
 from config import settings
 from db.conn import get_session
-from db.fetch_context import fetch_tables_under_schema, fetch_tbl_attr, fetch_field_details
+from db.fetch_context import fetch_tables_under_schema
 
 from services.execute_agent_service import execute_sql_agent
 from pydantic import BaseModel
@@ -18,6 +20,9 @@ class QueryRequest(BaseModel):
     schema_name: str
     table_name: str
     user_input: str
+
+
+DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 app = FastAPI()
 
@@ -58,7 +63,7 @@ async def sql_agent_page(request: Request):
 
 
 @app.get("/api/get_table")
-async def get_table_names( db: AsyncSession = Depends(get_session) ):
+async def get_table_names(db: DbSession):
     async with db.begin():
         result = await fetch_tables_under_schema(db,"public")
 
@@ -67,7 +72,7 @@ async def get_table_names( db: AsyncSession = Depends(get_session) ):
 
 
 @app.post("/api/query_agent")
-async def query_agent(query:QueryRequest,db: AsyncSession = Depends(get_session)):
+async def query_agent(query: QueryRequest, db: DbSession):
     result = await execute_sql_agent(db, query.schema_name, 
                                      query.table_name, query.user_input,
                                        query.session_id)
