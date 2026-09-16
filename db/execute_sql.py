@@ -13,6 +13,7 @@ async def execute_sql_query(
     sql: str,
     db: AsyncSession,
 ) -> dict:
+    logger._logger.info("Executing SQL query")
     query_result = await db.execute(
         text(sql)
     )
