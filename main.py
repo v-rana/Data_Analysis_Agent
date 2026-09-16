@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +13,7 @@ from db.conn import get_session
 from db.fetch_context import fetch_tables_under_schema
 
 from services.execute_agent_service import execute_sql_agent
+from services.csv_upload_service import upload_csv
 from pydantic import BaseModel
 
 class QueryRequest(BaseModel):
@@ -77,4 +78,32 @@ async def query_agent(query: QueryRequest, db: DbSession):
                                      query.table_name, query.user_input,
                                        query.session_id)
     return result
+
+
+@app.post(
+    "/api/upload-csv",
+    responses={
+        400: {"description": "Only CSV files are supported"},
+        403: {"description": "Invalid secret key"},
+    },
+)
+async def upload_csv_file(
+    db: DbSession,
+    file: UploadFile = File(...),
+    secret_key: str = Form(...),
+    table_name: str = Form(...),
+    schema_name: str = Form("public"),
+):
+    if secret_key != settings.UPLOAD_SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Invalid secret key")
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are supported")
+
+    return await upload_csv(
+        db,
+        file,
+        schema_name=schema_name,
+        table_name=table_name,
+    )
 

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     AUTH_ENABLED: bool = False
     AUTH_TOKEN: str = "change-me"
+    UPLOAD_SECRET_KEY: str
 
     LOG_LEVEL: str = "INFO"
     LOG_RESULT_DETAILS: bool = False
