@@ -1,23 +1,39 @@
-from fastapi import FastAPI ,Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth.simple_auth import AuthMiddleware, SimpleAuthService
+from config import settings
 from db.conn import get_session
-from db.fetch_context import fetch_tables_under_schema,fetch_tbl_attr,fetch_field_details
+from db.fetch_context import fetch_tables_under_schema, fetch_tbl_attr, fetch_field_details
 
 from services.execute_agent_service import execute_sql_agent
+from pydantic import BaseModel
+
+class QueryRequest(BaseModel):
+    session_id: str
+    schema_name: str
+    table_name: str
+    user_input: str
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-tbl_names = ["air_traffic_passenger_statistics_20260718"]
+
+
+if settings.AUTH_ENABLED:
+    app.add_middleware(
+        AuthMiddleware,
+        auth_service=SimpleAuthService(settings.AUTH_TOKEN),
+        public_paths=["/", "/health", "/sql-agent", "/static"],
+    )
+
+
 @app.get("/health")
 async def health():
     return {
@@ -25,33 +41,32 @@ async def health():
         "app": "sql_agent",
     }
 
-@app.get("/get_table")
+
+@app.get("/", include_in_schema=False)
+async def portfolio_page(request: Request):
+    return templates.TemplateResponse(request, "portfolio.html")
+
+@app.get("/ip")
+async def get_ip(request: Request):
+    return {
+        "ip": request.headers.get("x-real-ip")
+    }
+
+@app.get("/sql-agent", include_in_schema=False)
+async def sql_agent_page(request: Request):
+    return templates.TemplateResponse(request, "sql_agent.html")
+
+
+@app.get("/api/get_table")
 async def get_table_names( db: AsyncSession = Depends(get_session) ):
     async with db.begin():
         result = await fetch_tables_under_schema(db,"public")
 
     return result
 
-@app.get("/tbl_attrs")
-async def test_tbl_attr(db: AsyncSession = Depends(get_session)):
 
-    result = await fetch_tbl_attr(db,"public",["air_traffic_passenger_statistics_20260718"])
-    return result
 
-@app.get("/field_details")
-async def test_get_categories(db: AsyncSession = Depends(get_session)):
-    result = await fetch_field_details(db,"public","air_traffic_passenger_statistics_20260718",
-                                       ["Price Category Code","Activity Type Code"])
-    return result
-
-from pydantic import BaseModel
-class QueryRequest(BaseModel):
-    session_id: str
-    schema_name: str
-    table_name: str
-    user_input: str
-
-@app.post("/query_agent")
+@app.post("/api/query_agent")
 async def query_agent(query:QueryRequest,db: AsyncSession = Depends(get_session)):
     result = await execute_sql_agent(db, query.schema_name, 
                                      query.table_name, query.user_input,

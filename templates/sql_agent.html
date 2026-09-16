@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SQL Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='sql-agent/styles.css') }}" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="toolbar">
+        <label>
+          Session ID
+          <input id="sessionId" type="text" value="demo-session" />
+        </label>
+        <label>
+          Schema
+          <select id="schemaSelect"><option value="public">public</option></select>
+        </label>
+        <label>
+          Table
+          <select id="tableSelect"><option value="air_traffic_passenger_statistics_20260718">air_traffic_passenger_statistics_20260718</option></select>
+        </label>
+      </header>
+
+      <main id="chatBox" class="chat-box" aria-live="polite"></main>
+
+      <footer class="composer">
+        <textarea id="queryInput" rows="3" placeholder="Ask a question about the selected table..."></textarea>
+        <button id="sendBtn" type="button">Send</button>
+      </footer>
+    </div>
+
+    <script src="{{ url_for('static', path='sql-agent/config.js') }}"></script>
+    <script src="{{ url_for('static', path='sql-agent/app.js') }}"></script>
+  </body>
+</html>

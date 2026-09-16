@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Varun Rana - Software Engineer specializing in AI, Backend, web and developer tools." />
+  <title>Varun Rana - Software Engineer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', path='portfolio/style.css') }}" />
+</head>
+<body>
+  <nav class="nav" aria-label="Main navigation">
+    <div class="nav-links">
+      <a href="#projects">Projects</a>
+      <a href="#experience">Experience</a>
+      <a href="#about">About</a>
+    </div>
+    <div class="social-links" id="social-links" aria-label="Social profiles"></div>
+    <div class="ip-widget">
+      <button class="ip-button" id="ip-button" type="button">SHOW IP</button>
+      <output class="ip-result" id="result" aria-live="polite"></output>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-content">
+        <h1 id="hero-title">Varun Rana</h1>
+        <p class="hero-subtitle">AI Engineer - Agents, Backend and Developer Tools</p>
+      </div>
+    </section>
+
+    <section class="about" id="about" aria-labelledby="about-title">
+      <div class="section-header"><span class="section-label" id="about-title">ABOUT</span></div>
+      <div class="about-content" id="about-content"></div>
+    </section>
+
+    <section class="experience" id="experience" aria-labelledby="experience-title">
+      <div class="section-header"><span class="section-label" id="experience-title">EXPERIENCE</span></div>
+      <div id="experience-content"></div>
+    </section>
+
+    <section class="projects" id="projects" aria-labelledby="projects-title">
+      <div class="section-header"><span class="section-label" id="projects-title">PROJECTS</span></div>
+      <div class="project-grid" id="project-grid"></div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', path='portfolio/portfolio-data.js') }}"></script>
+  <script src="{{ url_for('static', path='portfolio/script.js') }}"></script>
+  <script src="{{ url_for('static', path='portfolio/portfolio_ip.js') }}"></script>
+</body>
+</html>
