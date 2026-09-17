@@ -7,15 +7,85 @@ const queryInput = document.getElementById("queryInput");
 const sendBtn = document.getElementById("sendBtn");
 const chatBox = document.getElementById("chatBox");
 
-function setDefaultTable() {
-  const defaultTable = "air_traffic_passenger_statistics_20260718";
-  tableSelect.innerHTML = "";
+async function loadTableOptions() {
+  const selectedSchema = schemaSelect.value || "public";
 
-  const option = document.createElement("option");
-  option.value = defaultTable;
-  option.textContent = defaultTable;
-  tableSelect.appendChild(option);
-  tableSelect.value = defaultTable;
+  try {
+    const response = await fetch(`${API_BASE}/api/get_table?schema=${encodeURIComponent(selectedSchema)}`);
+    if (!response.ok) {
+      throw new Error("Failed to load tables");
+    }
+
+    const tables = await response.json();
+    tableSelect.innerHTML = "";
+
+    if (!Array.isArray(tables) || tables.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No tables found";
+      tableSelect.appendChild(option);
+      return;
+    }
+
+    tables.forEach((tableName) => {
+      const option = document.createElement("option");
+      option.value = tableName;
+      option.textContent = tableName;
+      tableSelect.appendChild(option);
+    });
+
+    tableSelect.value = tables[0];
+  } catch (error) {
+    tableSelect.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Unable to load tables";
+    tableSelect.appendChild(option);
+    console.error(error);
+  }
+}
+
+async function loadSchemas() {
+  try {
+    const response = await fetch(`${API_BASE}/api/get_schemas`);
+    if (!response.ok) {
+      throw new Error("Failed to load schemas");
+    }
+
+    const schemas = await response.json();
+    schemaSelect.innerHTML = "";
+
+    if (!Array.isArray(schemas) || schemas.length === 0) {
+      const option = document.createElement("option");
+      option.value = "public";
+      option.textContent = "public";
+      schemaSelect.appendChild(option);
+      return;
+    }
+
+    schemas.forEach((schemaName) => {
+      const option = document.createElement("option");
+      option.value = schemaName;
+      option.textContent = schemaName;
+      schemaSelect.appendChild(option);
+    });
+
+    if (!schemas.includes("public")) {
+      schemaSelect.value = schemas[0];
+    } else {
+      schemaSelect.value = "public";
+    }
+
+    await loadTableOptions();
+  } catch (error) {
+    schemaSelect.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "public";
+    option.textContent = "public";
+    schemaSelect.appendChild(option);
+    console.error(error);
+    await loadTableOptions();
+  }
 }
 
 function addUserMessage(text) {
@@ -148,6 +218,8 @@ async function submitQuery() {
   chatBox.scrollTop = chatBox.scrollHeight;
 }
 
+schemaSelect.addEventListener("change", loadTableOptions);
+
 sendBtn.addEventListener("click", submitQuery);
 queryInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
@@ -156,4 +228,4 @@ queryInput.addEventListener("keydown", (event) => {
   }
 });
 
-window.addEventListener("DOMContentLoaded", setDefaultTable);
+window.addEventListener("DOMContentLoaded", loadSchemas);

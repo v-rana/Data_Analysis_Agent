@@ -19,6 +19,10 @@ DATE_COLUMNS = [
 PASSENGER_COUNT_COLUMN = "Passenger Count"
 
 
+def normalize_table_name(table_name: str) -> str:
+    return table_name.strip().lower()
+
+
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     for column in DATE_COLUMNS:
         if column in df.columns:
@@ -45,28 +49,28 @@ async def upload_csv(
     schema_name: str,
     table_name: str,
 ) -> dict[str, Any]:
-    logger._logger.info("Starting CSV upload: %s.%s", schema_name, table_name)
+    normalized_table_name = normalize_table_name(table_name)
+    logger._logger.info("Starting CSV upload: %s.%s", schema_name, normalized_table_name)
     df = clean_dataframe(pd.read_csv(BytesIO(await file.read())))
     logger._logger.info("CSV parsed: %d rows, %d columns", len(df), len(df.columns))
 
-    async with db.begin():
-        connection = await db.connection()
-        logger._logger.info("Writing CSV data: %s.%s", schema_name, table_name)
-        await connection.run_sync(
-            lambda sync_connection: df.to_sql(
-                name=table_name,
-                con=sync_connection,
-                schema=schema_name,
-                if_exists="replace",
-                index=False,
-            )
+    connection = await db.connection()
+    logger._logger.info("Writing CSV data: %s.%s", schema_name, table_name)
+    await connection.run_sync(
+        lambda sync_connection: df.to_sql(
+            name=normalized_table_name,
+            con=sync_connection,
+            schema=schema_name,
+            if_exists="replace",
+            index=False,
         )
+    )
 
-    table_context_cache.invalidate((schema_name, table_name))
-    logger._logger.info("CSV upload completed: %s.%s", schema_name, table_name)
+    table_context_cache.invalidate((schema_name, normalized_table_name))
+    logger._logger.info("CSV upload completed: %s.%s", schema_name, normalized_table_name)
     return {
         "schema_name": schema_name,
-        "table_name": table_name,
+        "table_name": normalized_table_name,
         "columns": len(df.columns),
         "rows": len(df),
     }

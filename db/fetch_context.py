@@ -15,6 +15,22 @@ logger = AppLogger(__name__)
 MAX_DISTINCT_VALUES = 30
 
 
+async def fetch_schemas(db_conn: AsyncSession) -> list[str]:
+    logger._logger.info("Listing schemas")
+    conn = await db_conn.connection()
+
+    def _get_schemas(sync_conn):
+        inspector = inspect(sync_conn)
+        schemas = inspector.get_schema_names()
+        return [
+            schema for schema in schemas
+            if schema not in {"information_schema", "pg_catalog"}
+            and not schema.startswith("pg_")
+        ]
+
+    return await conn.run_sync(_get_schemas)
+
+
 async def fetch_tables_under_schema(db_conn: AsyncSession,schema: str) -> list[str]:
     logger._logger.info("Listing tables for schema: %s", schema)
     #using the inspect function to get the table names directly
@@ -23,8 +39,7 @@ async def fetch_tables_under_schema(db_conn: AsyncSession,schema: str) -> list[s
     def _get_tables(sync_conn):
         inspector = inspect(sync_conn)
         return inspector.get_table_names(schema=schema)
-    async with conn.begin():
-        return await conn.run_sync(_get_tables)
+    return await conn.run_sync(_get_tables)
 
 async def load_table(
     db: AsyncSession,

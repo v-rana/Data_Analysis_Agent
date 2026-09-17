@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.simple_auth import AuthMiddleware, SimpleAuthService
 from config import settings
 from db.conn import get_session
-from db.fetch_context import fetch_tables_under_schema
+from db.fetch_context import fetch_schemas, fetch_tables_under_schema
 
 from services.execute_agent_service import execute_sql_agent
 from services.csv_upload_service import upload_csv
@@ -63,13 +63,15 @@ async def sql_agent_page(request: Request):
     return templates.TemplateResponse(request, "sql_agent.html")
 
 
+@app.get("/api/get_schemas")
+async def get_schema_names(db: DbSession):
+    return await fetch_schemas(db)
+
+
 @app.get("/api/get_table")
-async def get_table_names(db: DbSession):
-    async with db.begin():
-        result = await fetch_tables_under_schema(db,"public")
-
+async def get_table_names(db: DbSession, schema: str = "public"):
+    result = await fetch_tables_under_schema(db, schema)
     return result
-
 
 
 @app.post("/api/query_agent")
