@@ -1,5 +1,5 @@
 from temporalio import activity
-from models import ValidationResult
+from model.services_contract import ValidationResult
 
 @activity.defn
 async def validate_sql_activity(

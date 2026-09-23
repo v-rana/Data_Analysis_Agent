@@ -2,11 +2,11 @@ from temporalio import activity
 
 from agents.debugger_agent import execute_debugger_agent
 from agents.sql_agent import execute_sql_agent
-from models import SQLContext
+
 
 
 @activity.defn
-async def generate_sql_activity(context: SQLContext) -> str:
+async def generate_sql_activity(context: str) -> str:
     return await execute_sql_agent(
         session_id=context.session_id,
         schema_name=context.schema_name,
@@ -17,7 +17,7 @@ async def generate_sql_activity(context: SQLContext) -> str:
 
 @activity.defn
 async def repair_sql_activity(
-    context: SQLContext
+    context: str
     ) -> str:
     return await execute_debugger_agent(
         session_id=context.session_id,

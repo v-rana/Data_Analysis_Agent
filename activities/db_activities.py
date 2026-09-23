@@ -1,4 +1,4 @@
-from models import ExecutionResult
+from model.services_contract import ExecutionResult
 from temporalio import activity
 
 @activity.defn
