@@ -11,9 +11,11 @@ from auth.simple_auth import AuthMiddleware, SimpleAuthService
 from config import settings
 from db.conn import get_session
 from db.fetch_context import fetch_schemas, fetch_tables_under_schema
+from DTO.agent_trace_layer import AgentRunResponse, build_agent_run_response 
 
-from services.execute_agent_service import execute_sql_agent
+from services.execute_agent_service import execute_agent
 from services.csv_upload_service import upload_csv
+from services.session_service import create_session, delete_session, get_session_context, list_sessions
 from pydantic import BaseModel
 
 class QueryRequest(BaseModel):
@@ -74,12 +76,52 @@ async def get_table_names(db: DbSession, schema: str = "public"):
     return result
 
 
-@app.post("/api/query_agent")
+class SessionRequest(BaseModel):
+    mode: str = "personal"
+    secret_key: str | None = None
+
+
+@app.post("/api/session")
+async def start_session(payload: SessionRequest):
+    return create_session(payload.mode, payload.secret_key)
+
+
+@app.get("/api/sessions")
+async def get_sessions(secret_key: str):
+    return list_sessions(secret_key)
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session_endpoint(session_id: str, secret_key: str):
+    return delete_session(session_id, secret_key)
+
+
+@app.post(
+    "/api/query_agent",
+    response_model=AgentRunResponse,
+)
 async def query_agent(query: QueryRequest, db: DbSession):
-    result = await execute_sql_agent(db, query.schema_name, 
-                                     query.table_name, query.user_input,
-                                       query.session_id)
-    return result
+    if not query.session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing session_id",
+        )
+
+    session = get_session_context(query.session_id)
+
+    run = await execute_agent(
+        db,
+        query.schema_name,
+        query.table_name,
+        query.user_input,
+        query.session_id,
+    )
+
+    return build_agent_run_response(
+        run,
+        user_id=session["user_id"],
+        session_mode=session["mode"],
+    )
 
 
 @app.post(

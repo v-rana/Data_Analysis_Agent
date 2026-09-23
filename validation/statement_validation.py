@@ -1,7 +1,9 @@
 #using glot library , have to define what is allowed and disallowed
 from typing import Iterable, Type
-from sqlglot import parse, exp
+from sqlglot import  exp
 from sqlglot.expressions import Expression
+
+from model.services_contract import ValidationResult
 
 read_only_allowed  = (
     exp.Select,
@@ -26,25 +28,30 @@ read_only_disallowed = (
 )
 
 
-def is_valid(query: str,*,dialect:str,allowed_list: Iterable[Type[Expression]]=read_only_allowed,
-             disallowed_list: Iterable[Type[Expression]]=read_only_disallowed) -> bool:
+def is_valid(expression: list[Expression],*,allowed_list: Iterable[Type[Expression]]=read_only_allowed,
+             disallowed_list: Iterable[Type[Expression]]=read_only_disallowed) -> ValidationResult:
 
-    try:
-        expression = parse(query,dialect=dialect)
-    except Exception as exc:
-        print(f"Exception {exc}")
-        return False
-    
+
     allowed_list =  tuple(allowed_list)
     disallowed_list = tuple(disallowed_list)
+    not_valid = False
     for statement in expression:
         if not isinstance(statement,allowed_list):
-            return False
+            not_valid = True
+            break
 
         for node in statement.walk():
             if isinstance(node,disallowed_list):
-                return False
+                not_valid = True
+                break
 
-    return True
+    if not_valid:
+        return ValidationResult(
+            valid=False,
+            errors=["Query contains disallowed statements"],
+        )
+
+    errors: list[str] = []
+    return ValidationResult(valid=True, errors=errors)
     
     

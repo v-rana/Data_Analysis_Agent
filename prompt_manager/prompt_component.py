@@ -26,8 +26,7 @@ def sql_agent_prompt_template(sys_p_name:str,user_template_name: str ) -> ChatPr
 
 def debugger_agent_prompt_template(prompt_name: str) -> ChatPromptTemplate:
     system_prompt = read_prompt(prompt_name)
-    messages = [ ('system',system_prompt) , 
-                MessagesPlaceholder(variable_name="chat_history")]
+    messages = [ ('system',system_prompt) ]
     template = ChatPromptTemplate.from_messages(messages)
     return template
 

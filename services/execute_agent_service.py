@@ -1,51 +1,57 @@
 
 from typing import Any
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from uuid import uuid4
 from db.fetch_context import  build_table_context
-
-from models import (AgentResult, QueryStatus, RepairAttempt)
 
 from helper.format_context import format_table_context
 
-from agents.sql_agent import execute_sql_agent as generate_sql_query
+from agents.sql_agent import execute_sql_agent
 from agents.debugger_agent import execute_debugger_agent
 
 from cache.table_context import table_context_cache
-from validation.pipeline import run_pipeline
+from model.services_contract import (
+    AgentRun,
+    AttemptSource,
+    AttemptStatus,
+    RunStatus,
+    ScopeResult,
+    ScopeStatus,
+)
 
-from db.execute_sql import execute_sql_query
 from helper.logger import AppLogger
+from services.sql_runner import run_sql_attempt
 
 MAX_RETRIES = 2
 logger = AppLogger(__name__)
 
 
-async def _run_sql_with_error_mapping(
-    result: AgentResult,
-    db: AsyncSession,
-) -> AgentResult:
-    try:
-        result.rows = await execute_sql_query(result.sql, db)
-        return result
-    except Exception as exc:
-        result.status = QueryStatus.EXECUTION_FAILED
-        result.execution_error = str(exc)
-        result.execution_error_type = type(exc).__name__
-        return result
-
 
 @logger(log_result=True)
-async def execute_sql_agent(
+async def execute_agent(
     db: AsyncSession,
     schema_name: str,
     tbl_name: str,
     user_input: str,
     session_id: str,
-) -> AgentResult:
+) -> AgentRun:
+    run = AgentRun(
+        run_id=str(uuid4()),
+        session_id=session_id,
+        user_input=user_input,
+    )
+
     try:
+        run.scope = ScopeResult(
+            status=ScopeStatus.IN_SCOPE,
+        )
+        if run.scope.status == ScopeStatus.OUT_OF_SCOPE:
+            run.final_status = RunStatus.OUT_OF_SCOPE
+            run.final_response = run.scope.reason
+            return run
+
+        
         table_context = await table_context_cache.get_or_build(
             key=(schema_name, tbl_name),
             builder=lambda: build_table_context(
@@ -55,11 +61,12 @@ async def execute_sql_agent(
             ),
         )
 
+
         additional_context = format_table_context(
             table_context
         )
 
-        sql_query = await generate_sql_query(
+        sql_query = await execute_sql_agent(
             session_id=session_id,
             schema_name=schema_name,
             table_name=tbl_name,
@@ -71,38 +78,68 @@ async def execute_sql_agent(
         print("RETURNED SQL QUERY:", sql_query)
         print("-" * 30)
 
-        result = run_pipeline(sql_query, dialect="postgres")
+        attempt = await run_sql_attempt(
+            sql_query,
+            db,
+            dialect="postgres",
+            source=AttemptSource.GENERATION,
+        )
 
-        if result.status == QueryStatus.VALIDATION_FAILED:
-            return result
+        run.attempts.append(attempt)
 
-        result = await _run_sql_with_error_mapping(result, db)
-        cur_retry = 0
-        debug_history = []
+        if attempt.status == AttemptStatus.SUCCESS:
+            run.final_status = RunStatus.SUCCESS
+            run.result_rows = attempt.execution.rows
+            return run
+        
+        if not attempt.status.retryable:
+            run.final_status = RunStatus.FAILED
+            return run
 
-        while result.status == QueryStatus.EXECUTION_FAILED and cur_retry < MAX_RETRIES:
-            print(f"CURRENT RETRY: {cur_retry} LEVEL")
+
+
+        for retry in range(MAX_RETRIES):
+
+            print(f"CURRENT RETRY: {retry} LEVEL")
+
             repaired_sql = await execute_debugger_agent(
-                session_id,
-                result.sql,
-                f"{result.execution_error_type}:{result.execution_error}",
-                str(table_context),
-                debug_history,
+                session_id=session_id,
+                current_attempt=attempt,
+                attempt_history=run.attempts,
+                table_schema=additional_context,
             )
 
-            print(f"PREVIOUS SQL: {result.sql}\nNEW SQL:{repaired_sql}")
 
-            repaired_result = run_pipeline(repaired_sql, dialect="postgres")
+            print(
+                f"PREVIOUS SQL: "
+                f"{attempt.final_sql or attempt.original_sql}\n"
+                f"NEW SQL: {repaired_sql}"
+            )
 
-            if repaired_result.status == QueryStatus.VALIDATION_FAILED:
-                return repaired_result
+            repaired_attempt = await run_sql_attempt(
+                repaired_sql,
+                db,
+                dialect="postgres",
+                source=AttemptSource.REPAIR,
+            )
 
-            repaired_result = await _run_sql_with_error_mapping(repaired_result, db)
-            result = repaired_result
-            debug_history.append(RepairAttempt(sql=result.sql, error=result.execution_error or ""))
-            cur_retry += 1
+            run.attempts.append(repaired_attempt)
 
-        return result
-    except Exception:
-        logger._logger.exception("Unhandled failure in execute_sql_agent")
+            if repaired_attempt.status == AttemptStatus.SUCCESS:
+                run.final_status = RunStatus.SUCCESS
+                run.result_rows = repaired_attempt.execution.rows
+                return run
+
+            if not repaired_attempt.status.retryable:
+                run.final_status = RunStatus.FAILED
+                return run
+            
+            attempt = repaired_attempt
+
+        run.final_status = RunStatus.RETRY_EXHAUSTED
+        return run
+    except Exception as exc:
+        logger._logger.exception(
+            f"UNHANDLED FAILURE: {exc}"
+        )
         raise

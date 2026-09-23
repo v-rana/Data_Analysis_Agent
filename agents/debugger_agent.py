@@ -5,7 +5,8 @@ from llm.llm_obj import llm
 from llm_memory.memory_handler import get_hybrid_session_history
 from helper.logger import AppLogger
 
-from models import RepairAttempt
+from model.services_contract import SQLAttempt,AttemptStatus
+from helper.format_run_context import format_current_attempt, format_attempt_history
 
 logger = AppLogger(__name__)
 
@@ -13,30 +14,48 @@ logger = AppLogger(__name__)
 def build_debugger_agent(llm, prompt_name):
     prompt = debugger_agent_prompt_template(prompt_name)
     chain = prompt | llm
-    return RunnableWithMessageHistory(
-        chain,
-        get_hybrid_session_history,
-        input_messages_key="user_input",
-        history_messages_key="chat_history",
-    )
+    return chain
 
 
 _AGENT = build_debugger_agent(llm, "debug_agent_sys_prompt")
 
 
+def build_debugger_context(
+    current_attempt: SQLAttempt,
+    attempt_history: list[SQLAttempt],
+) -> dict[str, str]:
+
+    return {
+        "current_attempt": format_current_attempt(
+            current_attempt
+        ),
+        "attempt_history": format_attempt_history(
+            attempt_history
+        ),
+    }
+
 @logger(log_result=True)
 async def execute_debugger_agent(
+    *,
     session_id: str,
-    current_query: str,
-    error_message: str,
+    current_attempt: SQLAttempt,
+    attempt_history: list[SQLAttempt],
     table_schema: str,
-    debug_history: list[RepairAttempt] | None = None,
 ) -> str:
+
+    prompt_context = build_debugger_context(
+        current_attempt=current_attempt,
+        attempt_history=attempt_history,
+    )
+
     llm_output = await _AGENT.ainvoke(
         {
-            "debug_history": debug_history,
-            "current_query": current_query,
-            "error_message": error_message,
+            "attempt_history": prompt_context[
+                "attempt_history"
+            ],
+            "current_attempt": prompt_context[
+                "current_attempt"
+            ],
             "table_schema": table_schema,
         },
         config={
@@ -45,6 +64,7 @@ async def execute_debugger_agent(
             }
         },
     )
+
     return llm_output.text
 
 
