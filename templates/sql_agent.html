@@ -10,8 +10,20 @@
     <div class="app-shell">
       <header class="toolbar">
         <label>
+          Access Mode
+          <select id="sessionMode">
+            <option value="personal">Guest</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label id="secretKeyWrap" style="display: none;">
+          Secret Key
+          <input id="secretKeyInput" type="password" placeholder="Enter admin secret" />
+        </label>
+        <button id="sessionBtn" type="button">Start Session</button>
+        <label style="display: none;">
           Session ID
-          <input id="sessionId" type="text" value="demo-session" />
+          <input id="sessionId" type="text" readonly />
         </label>
         <label>
           Schema
@@ -27,7 +39,14 @@
         </label>
       </header>
 
-      <main id="chatBox" class="chat-box" aria-live="polite"></main>
+      <div class="app-layout">
+        <main id="chatBox" class="chat-box" aria-live="polite"></main>
+
+        <aside id="adminSessionPanel" class="admin-session-panel" style="display: none;">
+          <div class="admin-session-header">Active Sessions</div>
+          <select id="sessionListSelect" class="session-list-select" style="display: none;"></select>
+        </aside>
+      </div>
 
       <footer class="composer">
         <textarea id="queryInput" rows="3" placeholder="Ask a question about the selected table..."></textarea>

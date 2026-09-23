@@ -1,231 +1,697 @@
 const API_BASE = window.__APP_CONFIG__?.apiBase || "";
+const SESSION_KEY = "sql_agent_session_id";
 
+const sessionModeSelect = document.getElementById("sessionMode");
+const secretKeyWrap = document.getElementById("secretKeyWrap");
+const secretKeyInput = document.getElementById("secretKeyInput");
+const sessionBtn = document.getElementById("sessionBtn");
+const sessionListSelect = document.getElementById("sessionListSelect");
 const sessionIdInput = document.getElementById("sessionId");
 const schemaSelect = document.getElementById("schemaSelect");
 const tableSelect = document.getElementById("tableSelect");
 const queryInput = document.getElementById("queryInput");
 const sendBtn = document.getElementById("sendBtn");
 const chatBox = document.getElementById("chatBox");
+const adminSessionPanel = document.getElementById("adminSessionPanel");
 
-async function loadTableOptions() {
-  const selectedSchema = schemaSelect.value || "public";
 
-  try {
-    const response = await fetch(`${API_BASE}/api/get_table?schema=${encodeURIComponent(selectedSchema)}`);
-    if (!response.ok) {
-      throw new Error("Failed to load tables");
-    }
+/* ============================================================
+   Session
+   ============================================================ */
 
-    const tables = await response.json();
-    tableSelect.innerHTML = "";
-
-    if (!Array.isArray(tables) || tables.length === 0) {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "No tables found";
-      tableSelect.appendChild(option);
-      return;
-    }
-
-    tables.forEach((tableName) => {
-      const option = document.createElement("option");
-      option.value = tableName;
-      option.textContent = tableName;
-      tableSelect.appendChild(option);
-    });
-
-    tableSelect.value = tables[0];
-  } catch (error) {
-    tableSelect.innerHTML = "";
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "Unable to load tables";
-    tableSelect.appendChild(option);
-    console.error(error);
-  }
+function getStoredSessionId() {
+    return localStorage.getItem(SESSION_KEY);
 }
+
+function setStoredSessionId(sessionId) {
+    if (sessionId) {
+        localStorage.setItem(SESSION_KEY, sessionId);
+    }
+}
+
+function clearStoredSessionId() {
+    localStorage.removeItem(SESSION_KEY);
+}
+
+function updateSessionModeUI() {
+    const mode = sessionModeSelect.value;
+
+    if (mode === "admin") {
+        secretKeyWrap.style.display = "block";
+    } else {
+        secretKeyWrap.style.display = "none";
+        secretKeyInput.value = "";
+    }
+}
+
+async function startSession() {
+    const mode = sessionModeSelect.value;
+
+    const payload = {
+        mode,
+    };
+
+    if (mode === "admin") {
+        const secretKey = secretKeyInput.value.trim();
+
+        if (!secretKey) {
+            addAssistantError("Admin secret key is required.");
+            return;
+        }
+
+        payload.secret_key = secretKey;
+    }
+
+    sessionBtn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/session`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.detail || "Failed to start session.");
+        }
+
+        const sessionId = data.session_id;
+
+        setStoredSessionId(sessionId);
+        sessionIdInput.value = sessionId;
+
+        if (mode === "admin") {
+            adminSessionPanel.style.display = "block";
+            await loadActiveSessions();
+        } else {
+            adminSessionPanel.style.display = "none";
+        }
+    } catch (error) {
+        addAssistantError(error.message || "Failed to start session.");
+    } finally {
+        sessionBtn.disabled = false;
+    }
+}
+
+function restoreSession() {
+    const sessionId = getStoredSessionId();
+
+    if (sessionId) {
+        sessionIdInput.value = sessionId;
+    }
+}
+
+
+/* ============================================================
+   Schema / Table
+   ============================================================ */
 
 async function loadSchemas() {
-  try {
-    const response = await fetch(`${API_BASE}/api/get_schemas`);
-    if (!response.ok) {
-      throw new Error("Failed to load schemas");
+    schemaSelect.innerHTML = `
+        <option value="">Loading schemas...</option>
+    `;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/get_schemas`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.detail || "Failed to load schemas.");
+        }
+
+        schemaSelect.innerHTML = `
+            <option value="">Select schema</option>
+        `;
+
+        for (const schema of data) {
+            const option = document.createElement("option");
+            option.value = schema;
+            option.textContent = schema;
+            schemaSelect.appendChild(option);
+        }
+    } catch (error) {
+        schemaSelect.innerHTML = `
+            <option value="">Failed to load schemas</option>
+        `;
+
+        addAssistantError(error.message || "Failed to load schemas.");
     }
-
-    const schemas = await response.json();
-    schemaSelect.innerHTML = "";
-
-    if (!Array.isArray(schemas) || schemas.length === 0) {
-      const option = document.createElement("option");
-      option.value = "public";
-      option.textContent = "public";
-      schemaSelect.appendChild(option);
-      return;
-    }
-
-    schemas.forEach((schemaName) => {
-      const option = document.createElement("option");
-      option.value = schemaName;
-      option.textContent = schemaName;
-      schemaSelect.appendChild(option);
-    });
-
-    if (!schemas.includes("public")) {
-      schemaSelect.value = schemas[0];
-    } else {
-      schemaSelect.value = "public";
-    }
-
-    await loadTableOptions();
-  } catch (error) {
-    schemaSelect.innerHTML = "";
-    const option = document.createElement("option");
-    option.value = "public";
-    option.textContent = "public";
-    schemaSelect.appendChild(option);
-    console.error(error);
-    await loadTableOptions();
-  }
 }
+
+async function loadTables(schemaName) {
+    if (!schemaName) {
+        tableSelect.innerHTML = `
+            <option value="">Select table</option>
+        `;
+        return;
+    }
+
+    tableSelect.innerHTML = `
+        <option value="">Loading tables...</option>
+    `;
+
+    try {
+        const response = await fetch(
+            `${API_BASE}/api/get_table?schema=${encodeURIComponent(schemaName)}`
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.detail || "Failed to load tables.");
+        }
+
+        tableSelect.innerHTML = `
+            <option value="">Select table</option>
+        `;
+
+        for (const table of data) {
+            const option = document.createElement("option");
+            option.value = table;
+            option.textContent = table;
+            tableSelect.appendChild(option);
+        }
+    } catch (error) {
+        tableSelect.innerHTML = `
+            <option value="">Failed to load tables</option>
+        `;
+
+        addAssistantError(error.message || "Failed to load tables.");
+    }
+}
+
+/* ============================================================
+   Admin Sessions
+   ============================================================ */
+
+async function loadActiveSessions() {
+    try {
+        const response = await fetch(`${API_BASE}/api/sessions`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.detail || "Failed to load sessions.");
+        }
+
+        const sessions = data.sessions || [];
+
+        if (!sessions.length) {
+            sessionListSelect.style.display = "none";
+            return;
+        }
+
+        sessionListSelect.innerHTML = `
+            <option value="">Select session</option>
+        `;
+
+        for (const session of sessions) {
+            const option = document.createElement("option");
+
+            const sessionId = session.session_id || session.id;
+
+            option.value = sessionId;
+            option.textContent =
+                session.user_id
+                    ? `${session.user_id} — ${shortRunId(sessionId)}`
+                    : shortRunId(sessionId);
+
+            sessionListSelect.appendChild(option);
+        }
+
+        sessionListSelect.style.display = "block";
+    } catch (error) {
+        sessionListSelect.style.display = "none";
+    }
+}
+
+
+/* ============================================================
+   Chat Rendering
+   ============================================================ */
 
 function addUserMessage(text) {
-  const message = document.createElement("div");
-  message.className = "message user";
-  message.innerHTML = `
-    <div class="meta">You</div>
-    <div>${escapeHtml(text)}</div>
-  `;
-  chatBox.appendChild(message);
-  chatBox.scrollTop = chatBox.scrollHeight;
+    const message = document.createElement("div");
+    message.className = "message user";
+
+    message.innerHTML = `
+        <div class="message-content">
+            ${escapeHtml(text)}
+        </div>
+    `;
+
+    chatBox.appendChild(message);
+    chatBox.scrollTop = chatBox.scrollHeight;
 }
 
-function addAssistantResult(result, promptText) {
-  const message = document.createElement("div");
-  message.className = "message assistant";
+function addAssistantError(text) {
+    const message = document.createElement("div");
+    message.className = "message message-assistant";
 
-  const status = result?.status || "unknown";
-  const sql = result?.sql || "";
-  const rows = Array.isArray(result?.rows) ? result.rows : [];
-  const error = result?.execution_error || result?.validation_errors?.[0] || "";
+    message.innerHTML = `
+        <div class="agent-response failed">
+            ${escapeHtml(text)}
+        </div>
+    `;
 
-  const showSql = sql ? `<button class="sql-toggle" type="button">View SQL</button><div class="sql-box" style="display:none">${escapeHtml(sql)}</div>` : "";
+    chatBox.appendChild(message);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
 
-  const errorBox = error ? `<div class="error-box">${escapeHtml(error)}</div>` : "";
 
-  const tableMarkup = rows.length
-    ? `
-      <div class="table-wrap">
-        <table class="result-table">
-          <thead>
-            <tr>
-              ${Object.keys(rows[0]).map((key) => `<th>${escapeHtml(key)}</th>`).join("")}
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                ${Object.keys(row).map((key) => `<td>${escapeHtml(String(row[key] ?? ""))}</td>`).join("")}
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-    `
-    : "<div class=\"empty-state\">No rows returned.</div>";
+/* ============================================================
+   Query Submission
+   ============================================================ */
 
-  message.innerHTML = `
-    <div class="meta">Assistant</div>
-    <div><strong>Status:</strong> ${escapeHtml(status)}</div>
-    <div class="result-card">
-      <div class="header">Result</div>
-      <div class="body">
-        ${status === "success" ? tableMarkup : ""}
-        ${errorBox}
-        ${showSql}
-      </div>
-    </div>
-  `;
+async function submitQuery() {
+    const userInput = queryInput.value.trim();
 
-  const sqlToggle = message.querySelector(".sql-toggle");
-  const sqlBox = message.querySelector(".sql-box");
+    if (!userInput) {
+        return;
+    }
 
-  if (sqlToggle && sqlBox) {
-    sqlToggle.addEventListener("click", () => {
-      const isVisible = sqlBox.style.display !== "none";
-      sqlBox.style.display = isVisible ? "none" : "block";
-      sqlToggle.textContent = isVisible ? "View SQL" : "Hide SQL";
+    const sessionId = sessionIdInput.value.trim();
+    const schemaName = schemaSelect.value;
+    const tableName = tableSelect.value;
+
+    if (!sessionId) {
+        addAssistantError("Start a session before sending a query.");
+        return;
+    }
+
+    if (!schemaName) {
+        addAssistantError("Select a schema first.");
+        return;
+    }
+
+    if (!tableName) {
+        addAssistantError("Select a table first.");
+        return;
+    }
+
+    addUserMessage(userInput);
+
+    queryInput.value = "";
+    queryInput.disabled = true;
+    sendBtn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/query_agent`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                schema_name: schemaName,
+                table_name: tableName,
+                user_input: userInput,
+            }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.detail || "Request failed.");
+        }
+        console.log("AGENT RESPONSE:", data);
+        renderAgentRun(data);
+    } catch (error) {
+        addAssistantError(error.message || "Request failed.");
+    } finally {
+        queryInput.disabled = false;
+        sendBtn.disabled = false;
+        queryInput.focus();
+    }
+}
+
+
+/* ============================================================
+   Agent Run Rendering
+   ============================================================ */
+function renderAgentRun(run) {
+    const message = document.createElement("div");
+    message.className = "message message-assistant";
+
+    const responseHtml =
+        Array.isArray(run.result_rows)
+            ? `
+                <div class="agent-response">
+                    ${escapeHtml(JSON.stringify(run.result_rows))}
+                </div>
+            `
+            : `
+                <div class="agent-response failed">
+                    ${escapeHtml(getRunFailureMessage(run))}
+                </div>
+            `;
+
+    message.innerHTML = `
+        ${buildRunTrace(run)}
+        ${responseHtml}
+    `;
+
+    chatBox.appendChild(message);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+function buildRunTrace(run) {
+    const runStatusClass =
+        run.run_status === "success"
+            ? "success"
+            : "failed";
+
+    const attempts = Array.isArray(run.attempts)
+        ? run.attempts
+        : [];
+
+    let repairNumber = 0;
+
+    const attemptHtml = attempts
+        .map((attempt, index) => {
+            if (attempt.source === "repair") {
+                repairNumber++;
+            }
+
+            return buildAttempt(
+                attempt,
+                index,
+                attempt.source === "repair"
+                    ? repairNumber
+                    : null
+            );
+        })
+        .join("");
+
+    return `
+        <details class="run-trace">
+            <summary>
+                <span class="trace-label">RUN</span>
+
+                <span class="trace-run-id">
+                    ${escapeHtml(shortRunId(run.run_id))}
+                </span>
+
+                <span class="trace-status ${runStatusClass}">
+                    ${escapeHtml(formatStatus(run.run_status))}
+                </span>
+            </summary>
+
+            <div class="trace-body">
+                ${attemptHtml}
+            </div>
+        </details>
+    `;
+}
+
+function buildAttempt(attempt, index, repairNumber) {
+    const title = attempt.source === "repair"
+        ? `SQL Repair #${repairNumber}`
+        : "SQL Generation";
+
+    const statusClass =
+        attempt.status === "success"
+            ? "success"
+            : "failed";
+
+    const stages = buildAttemptStages(attempt);
+
+    return `
+        <details class="attempt">
+            <summary>
+                <span class="attempt-number">
+                    #${index + 1}
+                </span>
+
+                <span class="attempt-source">
+                    ${escapeHtml(title)}
+                </span>
+
+                <span class="attempt-status ${statusClass}">
+                    ${escapeHtml(formatStatus(attempt.status))}
+                </span>
+            </summary>
+
+            <div class="attempt-body">
+                <div class="attempt-stages">
+                    ${stages.map(buildStage).join("")}
+                </div>
+
+                <div class="attempt-detail">
+                    <div class="detail-label">SQL</div>
+
+                    <pre class="sql-block">${escapeHtml(
+                        attempt.sql || ""
+                    )}</pre>
+                </div>
+
+                ${
+                    attempt.error
+                        ? `
+                            <div class="attempt-detail">
+                                <div class="detail-label">Error</div>
+
+                                <pre class="error-block">${escapeHtml(
+                                    attempt.error
+                                )}</pre>
+                            </div>
+                        `
+                        : ""
+                }
+            </div>
+        </details>
+    `;
+}
+
+function buildAttemptStages(attempt) {
+    const stages = [];
+
+    /*
+     * Generation / Repair
+     *
+     * If the attempt exists, generation or repair itself succeeded
+     * enough to produce SQL that entered the SQL pipeline.
+     */
+    stages.push({
+        name:
+            attempt.source === "repair"
+                ? "SQL Repair"
+                : "SQL Generation",
+        status: "success",
     });
-  }
 
-  chatBox.appendChild(message);
-  chatBox.scrollTop = chatBox.scrollHeight;
+    /*
+     * Parsing
+     */
+    if (attempt.status === "parse_failed") {
+        stages.push({
+            name: "SQL Parsing",
+            status: "failed",
+        });
+
+        return stages;
+    }
+
+    stages.push({
+        name: "SQL Parsing",
+        status: "success",
+    });
+
+    /*
+     * Validation
+     */
+    if (attempt.status === "validation_failed") {
+        stages.push({
+            name: "SQL Validation",
+            status: "failed",
+        });
+
+        return stages;
+    }
+
+    stages.push({
+        name: "SQL Validation",
+        status: "success",
+    });
+
+    /*
+     * Query Policy
+     */
+    if (attempt.status === "policy_failed") {
+        stages.push({
+            name: "Query Policy",
+            status: "failed",
+        });
+
+        return stages;
+    }
+
+    stages.push({
+        name: "Query Policy",
+        status: "success",
+    });
+
+    /*
+     * Execution
+     */
+    if (attempt.status === "execution_failed") {
+        stages.push({
+            name: "SQL Execution",
+            status: "failed",
+        });
+
+        return stages;
+    }
+
+    if (attempt.status === "success") {
+        stages.push({
+            name: "SQL Execution",
+            status: "success",
+        });
+    }
+
+    return stages;
+}
+
+function buildStage(stage) {
+    const icon =
+        stage.status === "success"
+            ? "✓"
+            : "✕";
+
+    return `
+        <div class="stage ${stage.status}">
+            <span class="stage-icon">
+                ${icon}
+            </span>
+
+            <span class="stage-name">
+                ${escapeHtml(stage.name)}
+            </span>
+        </div>
+    `;
+}
+
+
+/* ============================================================
+   Run Status / Formatting
+   ============================================================ */
+
+function getRunFailureMessage(run) {
+    switch (run.run_status) {
+        case "out_of_scope":
+            return "Request is outside the supported scope.";
+
+        case "retry_exhausted":
+            return "SQL generation failed after the available repair attempts.";
+
+        case "failed":
+            return "SQL Agent failed to complete the request.";
+
+        default:
+            return "SQL Agent did not return a response.";
+    }
+}
+
+function formatStatus(status) {
+    return String(status ?? "")
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function shortRunId(runId) {
+    if (!runId) {
+        return "";
+    }
+
+    return runId.length > 12
+        ? `${runId.slice(0, 8)}...`
+        : runId;
 }
 
 function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
 }
 
-async function submitQuery() {
-  const sessionId = sessionIdInput.value.trim();
-  const schemaName = schemaSelect.value;
-  const tableName = tableSelect.value;
-  const userInput = queryInput.value.trim();
 
-  if (!sessionId || !tableName || !userInput) {
-    alert("Please provide a session ID, select a table, and enter a question.");
-    return;
-  }
+/* ============================================================
+   Event Listeners
+   ============================================================ */
 
-  addUserMessage(userInput);
-  queryInput.value = "";
+sessionModeSelect.addEventListener(
+    "change",
+    updateSessionModeUI
+);
 
-  try {
-    const response = await fetch(`${API_BASE}/api/query_agent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        session_id: sessionId,
-        schema_name: schemaName,
-        table_name: tableName,
-        user_input: userInput,
-      }),
-    });
+sessionBtn.addEventListener(
+    "click",
+    startSession
+);
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data?.detail || "Request failed");
+schemaSelect.addEventListener(
+    "change",
+    async () => {
+        await loadTables(schemaSelect.value);
     }
+);
 
-    addAssistantResult(data, userInput);
-  } catch (error) {
-    const message = document.createElement("div");
-    message.className = "message assistant";
-    message.innerHTML = `
-      <div class="meta">Assistant</div>
-      <div class="error-box">${escapeHtml(error.message || "Unknown error")}</div>
-    `;
-    chatBox.appendChild(message);
-  }
+sessionListSelect.addEventListener(
+    "change",
+    () => {
+        const sessionId = sessionListSelect.value;
 
-  chatBox.scrollTop = chatBox.scrollHeight;
-}
+        if (!sessionId) {
+            return;
+        }
 
-schemaSelect.addEventListener("change", loadTableOptions);
+        sessionIdInput.value = sessionId;
+        setStoredSessionId(sessionId);
+    }
+);
 
-sendBtn.addEventListener("click", submitQuery);
-queryInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    submitQuery();
-  }
-});
+sendBtn.addEventListener(
+    "click",
+    submitQuery
+);
 
-window.addEventListener("DOMContentLoaded", loadSchemas);
+queryInput.addEventListener(
+    "keydown",
+    event => {
+        if (
+            event.key === "Enter" &&
+            !event.shiftKey
+        ) {
+            event.preventDefault();
+            submitQuery();
+        }
+    }
+);
+
+
+/* ============================================================
+   Initialization
+   ============================================================ */
+
+document.addEventListener(
+    "DOMContentLoaded",
+    async () => {
+        updateSessionModeUI();
+        restoreSession();
+
+        await loadSchemas();
+
+        const sessionId = getStoredSessionId();
+
+        if (sessionId) {
+            sessionIdInput.value = sessionId;
+        }
+    }
+);
