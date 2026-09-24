@@ -22,6 +22,8 @@ from model.services_contract import (
 
 from helper.logger import AppLogger
 from services.sql_runner import run_sql_attempt
+from sse.progress_callback import ProgressCallback, emit_progress
+from sse.stages import ProgressStage
 
 MAX_RETRIES = 2
 logger = AppLogger(__name__)
@@ -35,6 +37,7 @@ async def execute_agent(
     tbl_name: str,
     user_input: str,
     session_id: str,
+    progress_callback: ProgressCallback | None = None,
 ) -> AgentRun:
     run = AgentRun(
         run_id=str(uuid4()),
@@ -65,6 +68,10 @@ async def execute_agent(
         additional_context = format_table_context(
             table_context
         )
+        await emit_progress(
+        progress_callback,
+        ProgressStage.GENERATING,
+        "Generating SQL...",)
 
         sql_query = await execute_sql_agent(
             session_id=session_id,
@@ -73,11 +80,19 @@ async def execute_agent(
             user_input=user_input,
             additional_context=additional_context,
         )
-
+        await emit_progress(
+            progress_callback,
+            ProgressStage.GENERATED,
+            "SQL generated.",
+        )
         print("-" * 30)
         print("RETURNED SQL QUERY:", sql_query)
         print("-" * 30)
-
+        await emit_progress(
+            progress_callback,
+            ProgressStage.EXECUTING,
+            "Executing SQL...",
+        )
         attempt = await run_sql_attempt(
             sql_query,
             db,
@@ -90,6 +105,11 @@ async def execute_agent(
         if attempt.status == AttemptStatus.SUCCESS:
             run.final_status = RunStatus.SUCCESS
             run.result_rows = attempt.execution.rows
+            await emit_progress(
+                progress_callback,
+                ProgressStage.COMPLETED,
+                "Query completed.",
+            )
             return run
         
         if not attempt.status.retryable:
@@ -101,7 +121,11 @@ async def execute_agent(
         for retry in range(MAX_RETRIES):
 
             print(f"CURRENT RETRY: {retry} LEVEL")
-
+            await emit_progress(
+                progress_callback,
+                ProgressStage.REPAIRING,
+                f"Repairing SQL (attempt {retry + 1}/{MAX_RETRIES})...",
+            )
             repaired_sql = await execute_debugger_agent(
                 session_id=session_id,
                 current_attempt=attempt,
@@ -109,7 +133,16 @@ async def execute_agent(
                 table_schema=additional_context,
             )
 
-
+            await emit_progress(
+                progress_callback,
+                ProgressStage.GENERATED,
+                f"SQL repair {retry + 1} generated.",
+            )
+            await emit_progress(
+                progress_callback,
+                ProgressStage.EXECUTING,
+                "Executing repaired SQL...",
+            )
             print(
                 f"PREVIOUS SQL: "
                 f"{attempt.final_sql or attempt.original_sql}\n"
@@ -128,6 +161,11 @@ async def execute_agent(
             if repaired_attempt.status == AttemptStatus.SUCCESS:
                 run.final_status = RunStatus.SUCCESS
                 run.result_rows = repaired_attempt.execution.rows
+                await emit_progress(
+                    progress_callback,
+                    ProgressStage.COMPLETED,
+                    "Query completed.",
+                )
                 return run
 
             if not repaired_attempt.status.retryable:
