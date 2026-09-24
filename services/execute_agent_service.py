@@ -39,8 +39,9 @@ async def execute_agent(
     session_id: str,
     progress_callback: ProgressCallback | None = None,
 ) -> AgentRun:
+    run_id=str(uuid4())
     run = AgentRun(
-        run_id=str(uuid4()),
+        run_id=run_id,
         session_id=session_id,
         user_input=user_input,
     )
@@ -70,6 +71,7 @@ async def execute_agent(
         )
         await emit_progress(
         progress_callback,
+        run.run_id,
         ProgressStage.GENERATING,
         "Generating SQL...",)
 
@@ -82,6 +84,7 @@ async def execute_agent(
         )
         await emit_progress(
             progress_callback,
+            run.run_id,
             ProgressStage.GENERATED,
             "SQL generated.",
         )
@@ -90,6 +93,7 @@ async def execute_agent(
         print("-" * 30)
         await emit_progress(
             progress_callback,
+            run.run_id,
             ProgressStage.EXECUTING,
             "Executing SQL...",
         )
@@ -107,6 +111,7 @@ async def execute_agent(
             run.result_rows = attempt.execution.rows
             await emit_progress(
                 progress_callback,
+                run.run_id,
                 ProgressStage.COMPLETED,
                 "Query completed.",
             )
@@ -123,6 +128,7 @@ async def execute_agent(
             print(f"CURRENT RETRY: {retry} LEVEL")
             await emit_progress(
                 progress_callback,
+                run.run_id,
                 ProgressStage.REPAIRING,
                 f"Repairing SQL (attempt {retry + 1}/{MAX_RETRIES})...",
             )
@@ -135,11 +141,13 @@ async def execute_agent(
 
             await emit_progress(
                 progress_callback,
+                run.run_id,
                 ProgressStage.GENERATED,
                 f"SQL repair {retry + 1} generated.",
             )
             await emit_progress(
                 progress_callback,
+                run.run_id,
                 ProgressStage.EXECUTING,
                 "Executing repaired SQL...",
             )
@@ -163,6 +171,7 @@ async def execute_agent(
                 run.result_rows = repaired_attempt.execution.rows
                 await emit_progress(
                     progress_callback,
+                    run.run_id,
                     ProgressStage.COMPLETED,
                     "Query completed.",
                 )
