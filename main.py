@@ -1,5 +1,8 @@
 from typing import Annotated
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
+
+import redis.asyncio as redis
 
 from fastapi import FastAPI, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +35,23 @@ class QueryRequest(BaseModel):
 
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    redis_client = redis.Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+    )
+
+    try:
+        await redis_client.ping()
+        logger._logger.info("Redis connection established")
+        app.state.redis = redis_client
+        yield
+    finally:
+        await redis_client.aclose()
+        logger._logger.info("Redis connection closed")
+
+app = FastAPI(lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")

@@ -10,6 +10,8 @@ logging.basicConfig(level=logging.INFO)
 class Settings(BaseSettings):
     APP_NAME: str = "sql_agent"
 
+    REDIS_URL: str = "redis://127.0.0.1:6379/0"
+    
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
