@@ -20,7 +20,7 @@ from DTO.agent_trace_layer import AgentRunResponse, build_agent_run_response
 from services.execute_agent_service import execute_agent
 from services.csv_upload_service import upload_csv
 from services.session_service import create_session, delete_session, get_session_context, list_sessions
-
+from services.rate_limit_service import enforce_rate_limits, rate_limit_key
 
 from helper.logger import AppLogger
 
@@ -66,6 +66,45 @@ if settings.AUTH_ENABLED:
     )
 
 
+def get_client_ip(request: Request) -> str:
+    client_ip = request.headers.get("x-real-ip")
+
+    if not client_ip:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to determine client IP",
+        )
+
+    return client_ip
+
+async def enforce_agent_rate_limits(
+    request: Request,
+    session_id: str,
+) -> None:
+    redis_client = request.app.state.redis
+    client_ip = get_client_ip(request)
+
+    await enforce_rate_limits(
+        redis_client,
+        [
+            (
+                rate_limit_key("session", session_id, "minute"),
+                settings.AGENT_SESSION_RATE_LIMIT_PER_MINUTE,
+                60,
+            ),
+            (
+                rate_limit_key("session", session_id, "day"),
+                settings.AGENT_SESSION_RATE_LIMIT_PER_DAY,
+                86400,
+            ),
+            (
+                rate_limit_key("ip", client_ip, "agent_hour"),
+                settings.AGENT_IP_RATE_LIMIT_PER_HOUR,
+                3600,
+            ),
+        ],
+    )
+
 @app.get("/health")
 async def health():
     return {
@@ -80,9 +119,7 @@ async def portfolio_page(request: Request):
 
 @app.get("/ip")
 async def get_ip(request: Request):
-    return {
-        "ip": request.headers.get("x-real-ip")
-    }
+    return {"ip": get_client_ip(request)}
 
 @app.get("/sql-agent", include_in_schema=False)
 async def sql_agent_page(request: Request):
@@ -110,6 +147,18 @@ async def start_session(
     payload: SessionRequest,
     request: Request,
 ):
+    client_ip = get_client_ip(request)
+
+    await enforce_rate_limits(
+        request.app.state.redis,
+        [
+            (
+                rate_limit_key("ip", client_ip, "session_create_hour"),
+                settings.SESSION_CREATE_RATE_LIMIT,
+                settings.SESSION_CREATE_RATE_WINDOW_SECONDS,
+            ),
+        ],
+    )
     return await create_session(
         request.app.state.redis,
         payload.mode,
@@ -155,6 +204,12 @@ async def query_agent(query: QueryRequest, db: DbSession,
         request.app.state.redis,
         query.session_id,
     )
+    
+    await enforce_agent_rate_limits(
+        request,
+        query.session_id,
+    )
+
     run = await execute_agent(
         db,
         query.schema_name,
@@ -290,8 +345,14 @@ async def query_agent_stream(
 
     session = await get_session_context(
     request.app.state.redis,
-    query.session_id,)
-    
+    query.session_id,
+    )
+
+    await enforce_agent_rate_limits(
+        request,
+        query.session_id,
+    )
+
     queue = asyncio.Queue()
     event_counter = 0
 

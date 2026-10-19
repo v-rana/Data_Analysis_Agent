@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     REDIS_SESSION_TTL: int = 7
     REDIS_SESSION_TTL_UNIT: Literal[
         "seconds","minutes","hours","days",] = "days"
+    SESSION_CREATE_RATE_LIMIT: int = 3
+    SESSION_CREATE_RATE_WINDOW_SECONDS: int = 3600
+
+    AGENT_SESSION_RATE_LIMIT_PER_MINUTE: int = 3
+    AGENT_SESSION_RATE_LIMIT_PER_DAY: int = 10
+    AGENT_IP_RATE_LIMIT_PER_HOUR: int = 10
+        
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
