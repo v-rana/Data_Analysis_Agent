@@ -75,13 +75,14 @@ async def execute_agent(
         ProgressStage.GENERATING,
         "Generating SQL...",)
 
-        sql_query = await execute_sql_agent(
-            session_id=session_id,
-            schema_name=schema_name,
-            table_name=tbl_name,
-            user_input=user_input,
-            additional_context=additional_context,
-        )
+        # sql_query = await execute_sql_agent(
+        #     session_id=session_id,
+        #     schema_name=schema_name,
+        #     table_name=tbl_name,
+        #     user_input=user_input,
+        #     additional_context=additional_context,
+        # )
+        sql_query = "SELECT COUNT(*) AS row_count FROM \"air_traffic_passenger_statistics_20260718\" LMIT 10"
         await emit_progress(
             progress_callback,
             run.run_id,

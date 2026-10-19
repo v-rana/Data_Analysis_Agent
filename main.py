@@ -1,4 +1,5 @@
 from typing import Annotated
+from pydantic import BaseModel
 
 from fastapi import FastAPI, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +17,11 @@ from DTO.agent_trace_layer import AgentRunResponse, build_agent_run_response
 from services.execute_agent_service import execute_agent
 from services.csv_upload_service import upload_csv
 from services.session_service import create_session, delete_session, get_session_context, list_sessions
-from pydantic import BaseModel
+
+
+from helper.logger import AppLogger
+
+logger = AppLogger(__name__)
 
 class QueryRequest(BaseModel):
     session_id: str
@@ -150,4 +155,134 @@ async def upload_csv_file(
         schema_name=schema_name,
         table_name=table_name,
     )
+
+import asyncio
+import json
+
+from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
+
+
+def format_sse(
+    event: str,
+    event_id: int,
+    data: dict,
+) -> str:
+    return (
+        f"id: {event_id}\n"
+        f"event: {event}\n"
+        f"data: {json.dumps(data)}\n\n"
+    )
+
+async def event_stream(
+    agent_task,
+    queue,
+    session,
+):
+    event_id = 0
+
+    while True:
+        if agent_task.done() and queue.empty():
+            break
+
+        try:
+            event = await asyncio.wait_for(
+                queue.get(),
+                timeout=0.5,
+            )
+        except asyncio.TimeoutError:
+            continue
+
+        event_id = event["event_id"]
+
+        yield format_sse(
+            "progress",
+            event_id,
+            event,
+        )
+
+    try:
+        run = await agent_task
+        response = build_agent_run_response(
+            run,
+            user_id=session["user_id"],
+            session_mode=session["mode"],
+        )
+
+        event_id += 1
+
+        yield format_sse(
+            "complete",
+            event_id,
+            response.model_dump(mode="json"),
+        )
+
+    except Exception:
+
+        logger._logger.exception(
+            "Streaming agent execution failed"
+        )
+
+        event_id += 1
+
+        yield format_sse(
+            "failed",
+            event_id,
+            {
+                "run_id": event_id,
+                "stage": "failed",
+                "message": "Query could not be completed.",
+            },
+        )
+
+@app.post("/api/query_agent/stream")
+async def query_agent_stream(
+    query: QueryRequest,
+    db: DbSession,
+):
+    if not query.session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing session_id",
+        )
+
+    session = get_session_context(query.session_id)
+
+    queue = asyncio.Queue()
+    event_counter = 0
+
+    async def progress_callback(
+        callback_run_id: str,
+        stage: str,
+        message: str,
+    ):
+        nonlocal event_counter
+
+        event_counter += 1
+
+        await queue.put(
+            {
+                "event_id": event_counter,
+                "run_id": callback_run_id,
+                "stage": stage,
+                "message": message,
+            }
+        )
+
+    agent_task = asyncio.create_task(
+        execute_agent(
+            db,
+            query.schema_name,
+            query.table_name,
+            query.user_input,
+            query.session_id,
+            progress_callback=progress_callback,
+        )
+    )
+
+    return StreamingResponse(
+        event_stream(agent_task, queue,session),
+        media_type="text/event-stream",
+    )
+
 

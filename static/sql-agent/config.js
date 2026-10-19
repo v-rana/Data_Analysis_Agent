@@ -1,3 +1,4 @@
 window.__APP_CONFIG__ = {
-  apiBase: ""
+  apiBase: "",
+  USE_SSE: true
 };

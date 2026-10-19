@@ -266,6 +266,195 @@ function addAssistantError(text) {
    Query Submission
    ============================================================ */
 
+const USE_SSE = window.__APP_CONFIG__.USE_SSE;
+
+function parseSSEChunk(buffer) {
+    const events = [];
+    const parts = buffer.split("\n\n");
+
+    // The last part may be incomplete.
+    const remaining = parts.pop();
+
+    for (const part of parts) {
+        if (!part.trim()) {
+            continue;
+        }
+
+        let eventName = "message";
+        let data = null;
+        let eventId = null;
+
+        for (const line of part.split("\n")) {
+            if (line.startsWith("event:")) {
+                eventName = line.slice(6).trim();
+            } else if (line.startsWith("id:")) {
+                eventId = line.slice(3).trim();
+            } else if (line.startsWith("data:")) {
+                data = line.slice(5).trim();
+            }
+        }
+
+        if (data !== null) {
+            events.push({
+                event: eventName,
+                id: eventId,
+                data: JSON.parse(data),
+            });
+        }
+    }
+
+    return {
+        events,
+        remaining,
+    };
+}
+
+function createProgressMessage() {
+    const message = document.createElement("div");
+
+    message.className = "message message-assistant";
+
+    message.innerHTML = `
+        <div class="agent-response agent-progress">
+            <span class="progress-message">
+                Working...
+            </span>
+        </div>
+    `;
+
+    chatBox.appendChild(message);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    return message;
+}
+
+function updateProgressMessage(message, text) {
+    const progressElement =
+        message.querySelector(".progress-message");
+
+    if (progressElement) {
+        progressElement.textContent = text;
+    }
+
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+
+async function submitQueryNormal(payload) {
+    const response = await fetch(
+        `${API_BASE}/api/query_agent`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(
+            data?.detail || "Request failed."
+        );
+    }
+
+    renderAgentRun(data);
+}
+
+
+async function consumeSSE(response, progressMessage) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = "";
+
+    while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+            break;
+        }
+
+        buffer += decoder.decode(value, {
+            stream: true,
+        });
+
+        const parsed = parseSSEChunk(buffer);
+
+        buffer = parsed.remaining;
+
+        for (const event of parsed.events) {
+            if (event.event === "progress") {
+                updateProgressMessage(
+                    progressMessage,
+                    event.data.message,
+                );
+            }
+
+            if (event.event === "complete") {
+                console.log(
+                    "AGENT RESPONSE:",
+                    event.data,
+                );
+
+                progressMessage.remove();
+
+                renderAgentRun(event.data);
+            }
+
+            if (event.event === "failed") {
+                progressMessage.remove();
+
+                throw new Error(
+                    event.data.message ||
+                    "Query could not be completed.",
+                );
+            }
+        }
+    }
+}
+
+async function submitQuerySSE(payload) {
+    const response = await fetch(
+        `${API_BASE}/api/query_agent/stream`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        }
+    );
+
+    if (!response.ok) {
+        let message = "Request failed.";
+
+        try {
+            const data = await response.json();
+            message = data?.detail || message;
+        } catch {
+            // Response was not JSON.
+        }
+
+        throw new Error(message);
+    }
+
+    if (!response.body) {
+        throw new Error(
+            "Streaming response is not available."
+        );
+    }
+
+    const progressMessage = createProgressMessage();
+
+    await consumeSSE(
+        response,
+        progressMessage,
+    );
+}
+
 async function submitQuery() {
     const userInput = queryInput.value.trim();
 
@@ -278,55 +467,58 @@ async function submitQuery() {
     const tableName = tableSelect.value;
 
     if (!sessionId) {
-        addAssistantError("Start a session before sending a query.");
+        addAssistantError(
+            "Start a session before sending a query."
+        );
         return;
     }
 
     if (!schemaName) {
-        addAssistantError("Select a schema first.");
+        addAssistantError(
+            "Select a schema first."
+        );
         return;
     }
 
     if (!tableName) {
-        addAssistantError("Select a table first.");
+        addAssistantError(
+            "Select a table first."
+        );
         return;
     }
 
-    addUserMessage(userInput);
+    const payload = {
+        session_id: sessionId,
+        schema_name: schemaName,
+        table_name: tableName,
+        user_input: userInput,
+    };
 
+    addUserMessage(userInput);
     queryInput.value = "";
+
     queryInput.disabled = true;
     sendBtn.disabled = true;
 
     try {
-        const response = await fetch(`${API_BASE}/api/query_agent`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                session_id: sessionId,
-                schema_name: schemaName,
-                table_name: tableName,
-                user_input: userInput,
-            }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data?.detail || "Request failed.");
+        if (USE_SSE) {
+            await submitQuerySSE(payload);
+        } else {
+            await submitQueryNormal(payload);
         }
-        console.log("AGENT RESPONSE:", data);
-        renderAgentRun(data);
     } catch (error) {
-        addAssistantError(error.message || "Request failed.");
+        addAssistantError(
+            error.message || "Request failed."
+        );
     } finally {
         queryInput.disabled = false;
         sendBtn.disabled = false;
         queryInput.focus();
     }
 }
+
+
+
 
 
 /* ============================================================
