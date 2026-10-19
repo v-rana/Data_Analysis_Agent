@@ -1,7 +1,8 @@
 import logging
 
 from pydantic_settings import BaseSettings
-from pydantic import computed_field
+from pydantic import computed_field, field_validator
+from typing import Literal
 from urllib.parse import quote_plus
 
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +17,21 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int
     OPENAI_API_KEY: str
     GOOGLE_API_KEY: str
+    # Optional: required only when DEEPSEEK_API_KEY or LLM_PROVIDER=deepseek.
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    DEEPSEEK_MODEL: str = "deepseek-chat"
+
+    # Selectable LLM used outside agents (e.g. conversation summarization).
+    LLM_PROVIDER: Literal["google", "openai", "deepseek"] = "google"
+    LLM_MODEL: str = ""
+    LLM_TEMPERATURE: float = 0
+    LLM_MAX_TOKENS: int = 1500
+    LLM_MAX_RETRIES: int = 2
+
+    # Agents are pinned to this provider/model and ignore LLM_PROVIDER.
+    AGENT_LLM_PROVIDER: Literal["google", "openai", "deepseek"] = "google"
+    AGENT_LLM_MODEL: str = "gemini-3.5-flash"
 
     AUTH_ENABLED: bool = False
     AUTH_TOKEN: str = "change-me"
@@ -25,6 +41,11 @@ class Settings(BaseSettings):
     LOG_RESULT_DETAILS: bool = False
     LOG_INPUT_DETAILS: bool = False
     
+    @field_validator("LLM_PROVIDER", "AGENT_LLM_PROVIDER", mode="before")
+    @classmethod
+    def _normalize_provider(cls, value: str) -> str:
+        return str(value).strip().lower()
+
     @computed_field
     @property
     def DB_URL(self) -> str:
