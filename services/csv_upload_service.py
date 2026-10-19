@@ -65,7 +65,7 @@ async def upload_csv(
             index=False,
         )
     )
-
+    await db.commit()
     table_context_cache.invalidate((schema_name, normalized_table_name))
     logger._logger.info("CSV upload completed: %s.%s", schema_name, normalized_table_name)
     return {
