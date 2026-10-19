@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "sql_agent"
 
     REDIS_URL: str = "redis://127.0.0.1:6379/0"
-    
+    REDIS_SESSION_TTL: int = 7
+    REDIS_SESSION_TTL_UNIT: Literal[
+        "seconds","minutes","hours","days",] = "days"
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
@@ -60,6 +62,18 @@ class Settings(BaseSettings):
             f"{self.POSTGRES_PORT}/"
             f"{self.POSTGRES_DB}"
         )
+    @computed_field
+    @property
+    def REDIS_SESSION_TTL_SECONDS(self) -> int:
+        multipliers = {
+            "seconds": 1,
+            "minutes": 60,
+            "hours": 3600,
+            "days": 86400,
+        }
+        return self.REDIS_SESSION_TTL * multipliers[
+            self.REDIS_SESSION_TTL_UNIT
+        ]
     class Config:
         env_file = ".env"
 
