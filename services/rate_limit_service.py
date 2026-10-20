@@ -1,9 +1,12 @@
+
 from dataclasses import dataclass
+import time
 
 from fastapi import HTTPException
 from redis.asyncio import Redis
 
 from config import settings
+
 
 @dataclass(frozen=True)
 class RateLimitPolicy:
@@ -20,6 +23,16 @@ class RateLimitPolicy:
         )
 
 
+@dataclass(frozen=True)
+class RateLimitCheck:
+    policy: RateLimitPolicy
+    identifier: str
+
+    @property
+    def key(self) -> str:
+        return self.policy.build_key(self.identifier)
+
+
 RATE_LIMIT_POLICIES = {
     "session_create_per_ip": RateLimitPolicy(
         name="session_create_per_ip",
@@ -33,23 +46,24 @@ RATE_LIMIT_POLICIES = {
         scope="session",
         period="minute",
         limit=settings.AGENT_SESSION_RATE_LIMIT_PER_MINUTE,
-        window_seconds=60,
+        window_seconds=settings.AGENT_SESSION_RATE_WINDOW_SECONDS,
     ),
     "agent_per_session_day": RateLimitPolicy(
         name="agent_per_session_day",
         scope="session",
         period="day",
         limit=settings.AGENT_SESSION_RATE_LIMIT_PER_DAY,
-        window_seconds=86400,
+        window_seconds=settings.AGENT_SESSION_DAY_WINDOW_SECONDS,
     ),
     "agent_per_ip_hour": RateLimitPolicy(
         name="agent_per_ip_hour",
         scope="ip",
         period="agent_hour",
         limit=settings.AGENT_IP_RATE_LIMIT_PER_HOUR,
-        window_seconds=3600,
+        window_seconds=settings.AGENT_IP_RATE_WINDOW_SECONDS,
     ),
 }
+
 
 RATE_LIMIT_SCRIPT = """
 for i = 1, #KEYS do
@@ -78,14 +92,6 @@ return {1, 0, 0}
 """
 
 
-def rate_limit_key(
-    scope: str,
-    identifier: str,
-    period: str,
-) -> str:
-    return f"sql_agent:rate_limit:{scope}:{identifier}:{period}"
-
-
 def get_rate_limit_policy(name: str) -> RateLimitPolicy:
     try:
         return RATE_LIMIT_POLICIES[name]
@@ -96,34 +102,32 @@ def get_rate_limit_policy(name: str) -> RateLimitPolicy:
 def policy_limit(
     policy_name: str,
     identifier: str,
-) -> tuple[str, int, int]:
-    policy = get_rate_limit_policy(policy_name)
-
-    return (
-        policy.build_key(identifier),
-        policy.limit,
-        policy.window_seconds,
+) -> RateLimitCheck:
+    return RateLimitCheck(
+        policy=get_rate_limit_policy(policy_name),
+        identifier=identifier,
     )
 
 
 async def enforce_rate_limits(
     redis_client: Redis,
-    limits: list[tuple[str, int, int]],
+    limits: list[RateLimitCheck],
 ) -> None:
     """
-    Atomically check and increment rate-limit counters.
-
-    Each tuple contains (redis_key, maximum_requests, window_seconds).
+    Atomically check and increment all supplied rate-limit policies.
     Rejected requests do not increment any of the supplied counters.
     """
     if not limits:
         return
 
-    keys = [key for key, _, _ in limits]
+    keys = [item.key for item in limits]
     args = [
         value
-        for _, maximum, window in limits
-        for value in (maximum, window)
+        for item in limits
+        for value in (
+            item.policy.limit,
+            item.policy.window_seconds,
+        )
     ]
 
     result = await redis_client.eval(
@@ -133,13 +137,34 @@ async def enforce_rate_limits(
         *args,
     )
 
-    allowed = int(result[0])
+    if int(result[0]):
+        return
 
-    if not allowed:
-        retry_after = max(1, int(result[2]))
+    rejected_index = int(result[1]) - 1
+    retry_after = max(1, int(result[2]))
 
-        raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded. Try again later.",
-            headers={"Retry-After": str(retry_after)},
-        )
+    rejected = limits[rejected_index]
+    policy = rejected.policy
+
+    reset_timestamp = int(time.time()) + retry_after
+
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "error": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Rate limit exceeded. Try again later.",
+                "policy": policy.name,
+                "scope": policy.scope,
+                "limit": policy.limit,
+                "remaining": 0,
+                "reset_after_seconds": retry_after,
+            }
+        },
+        headers={
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": str(policy.limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(reset_timestamp),
+        },
+    )
