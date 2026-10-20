@@ -20,7 +20,10 @@ from DTO.agent_trace_layer import AgentRunResponse, build_agent_run_response
 from services.execute_agent_service import execute_agent
 from services.csv_upload_service import upload_csv
 from services.session_service import create_session, delete_session, get_session_context, list_sessions
-from services.rate_limit_service import enforce_rate_limits, rate_limit_key
+from services.rate_limit_service import (
+    enforce_rate_limits,
+    policy_limit,
+)
 
 from helper.logger import AppLogger
 
@@ -87,24 +90,12 @@ async def enforce_agent_rate_limits(
     await enforce_rate_limits(
         redis_client,
         [
-            (
-                rate_limit_key("session", session_id, "minute"),
-                settings.AGENT_SESSION_RATE_LIMIT_PER_MINUTE,
-                60,
-            ),
-            (
-                rate_limit_key("session", session_id, "day"),
-                settings.AGENT_SESSION_RATE_LIMIT_PER_DAY,
-                86400,
-            ),
-            (
-                rate_limit_key("ip", client_ip, "agent_hour"),
-                settings.AGENT_IP_RATE_LIMIT_PER_HOUR,
-                3600,
-            ),
+            policy_limit("agent_per_session_minute", session_id),
+            policy_limit("agent_per_session_day", session_id),
+            policy_limit("agent_per_ip_hour", client_ip),
         ],
     )
-
+    
 @app.get("/health")
 async def health():
     return {
@@ -150,15 +141,11 @@ async def start_session(
     client_ip = get_client_ip(request)
 
     await enforce_rate_limits(
-        request.app.state.redis,
-        [
-            (
-                rate_limit_key("ip", client_ip, "session_create_hour"),
-                settings.SESSION_CREATE_RATE_LIMIT,
-                settings.SESSION_CREATE_RATE_WINDOW_SECONDS,
-            ),
-        ],
-    )
+            request.app.state.redis,
+            [
+                policy_limit("session_create_per_ip", client_ip),
+            ],
+        )
     return await create_session(
         request.app.state.redis,
         payload.mode,

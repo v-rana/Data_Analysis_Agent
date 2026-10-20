@@ -1,7 +1,55 @@
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from redis.asyncio import Redis
 
+from config import settings
+
+@dataclass(frozen=True)
+class RateLimitPolicy:
+    name: str
+    scope: str
+    period: str
+    limit: int
+    window_seconds: int
+
+    def build_key(self, identifier: str) -> str:
+        return (
+            f"sql_agent:rate_limit:"
+            f"{self.scope}:{identifier}:{self.period}"
+        )
+
+
+RATE_LIMIT_POLICIES = {
+    "session_create_per_ip": RateLimitPolicy(
+        name="session_create_per_ip",
+        scope="ip",
+        period="session_create_hour",
+        limit=settings.SESSION_CREATE_RATE_LIMIT,
+        window_seconds=settings.SESSION_CREATE_RATE_WINDOW_SECONDS,
+    ),
+    "agent_per_session_minute": RateLimitPolicy(
+        name="agent_per_session_minute",
+        scope="session",
+        period="minute",
+        limit=settings.AGENT_SESSION_RATE_LIMIT_PER_MINUTE,
+        window_seconds=60,
+    ),
+    "agent_per_session_day": RateLimitPolicy(
+        name="agent_per_session_day",
+        scope="session",
+        period="day",
+        limit=settings.AGENT_SESSION_RATE_LIMIT_PER_DAY,
+        window_seconds=86400,
+    ),
+    "agent_per_ip_hour": RateLimitPolicy(
+        name="agent_per_ip_hour",
+        scope="ip",
+        period="agent_hour",
+        limit=settings.AGENT_IP_RATE_LIMIT_PER_HOUR,
+        window_seconds=3600,
+    ),
+}
 
 RATE_LIMIT_SCRIPT = """
 for i = 1, #KEYS do
@@ -29,8 +77,34 @@ end
 return {1, 0, 0}
 """
 
-def rate_limit_key(scope: str, identifier: str, period: str) -> str:
+
+def rate_limit_key(
+    scope: str,
+    identifier: str,
+    period: str,
+) -> str:
     return f"sql_agent:rate_limit:{scope}:{identifier}:{period}"
+
+
+def get_rate_limit_policy(name: str) -> RateLimitPolicy:
+    try:
+        return RATE_LIMIT_POLICIES[name]
+    except KeyError:
+        raise ValueError(f"Unknown rate-limit policy: {name}") from None
+
+
+def policy_limit(
+    policy_name: str,
+    identifier: str,
+) -> tuple[str, int, int]:
+    policy = get_rate_limit_policy(policy_name)
+
+    return (
+        policy.build_key(identifier),
+        policy.limit,
+        policy.window_seconds,
+    )
+
 
 async def enforce_rate_limits(
     redis_client: Redis,
