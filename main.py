@@ -4,7 +4,16 @@ from contextlib import asynccontextmanager
 
 import redis.asyncio as redis
 
-from fastapi import FastAPI, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    FastAPI,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -80,14 +89,16 @@ def get_client_ip(request: Request) -> str:
 
     return client_ip
 
+
 async def enforce_agent_rate_limits(
     request: Request,
     session_id: str,
+    response: Response,
 ) -> None:
     redis_client = request.app.state.redis
     client_ip = get_client_ip(request)
 
-    await enforce_rate_limits(
+    headers = await enforce_rate_limits(
         redis_client,
         [
             policy_limit("agent_per_session_minute", session_id),
@@ -95,7 +106,10 @@ async def enforce_agent_rate_limits(
             policy_limit("agent_per_ip_hour", client_ip),
         ],
     )
-    
+
+    for name, value in headers.items():
+        response.headers[name] = value
+   
 @app.get("/health")
 async def health():
     return {
@@ -179,8 +193,12 @@ async def delete_session_endpoint(
     "/api/query_agent",
     response_model=AgentRunResponse,
 )
-async def query_agent(query: QueryRequest, db: DbSession,
-                      request: Request,):
+async def query_agent(
+    query: QueryRequest,
+    db: DbSession,
+    request: Request,
+    response: Response,
+):
     if not query.session_id:
         raise HTTPException(
             status_code=400,
@@ -193,8 +211,9 @@ async def query_agent(query: QueryRequest, db: DbSession,
     )
     
     await enforce_agent_rate_limits(
-        request,
-        query.session_id,
+    request,
+    query.session_id,
+    response,
     )
 
     run = await execute_agent(
@@ -323,6 +342,7 @@ async def query_agent_stream(
     query: QueryRequest,
     db: DbSession,
     request: Request,
+    response: Response,
 ):
     if not query.session_id:
         raise HTTPException(
@@ -336,8 +356,9 @@ async def query_agent_stream(
     )
 
     await enforce_agent_rate_limits(
-        request,
-        query.session_id,
+    request,
+    query.session_id,
+    response,
     )
 
     queue = asyncio.Queue()

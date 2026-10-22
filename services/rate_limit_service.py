@@ -79,6 +79,8 @@ for i = 1, #KEYS do
     end
 end
 
+local results = {1, 0, 0}
+
 for i = 1, #KEYS do
     local window = tonumber(ARGV[(i - 1) * 2 + 2])
     local count = redis.call("INCR", KEYS[i])
@@ -86,11 +88,13 @@ for i = 1, #KEYS do
     if count == 1 then
         redis.call("EXPIRE", KEYS[i], window)
     end
+
+    table.insert(results, count)
+    table.insert(results, redis.call("TTL", KEYS[i]))
 end
 
-return {1, 0, 0}
+return results
 """
-
 
 def get_rate_limit_policy(name: str) -> RateLimitPolicy:
     try:
@@ -109,16 +113,18 @@ def policy_limit(
     )
 
 
+
 async def enforce_rate_limits(
     redis_client: Redis,
     limits: list[RateLimitCheck],
-) -> None:
+) -> dict[str, str]:
     """
     Atomically check and increment all supplied rate-limit policies.
-    Rejected requests do not increment any of the supplied counters.
+    Return quota headers for successful requests.
+    Rejected requests do not increment any supplied counters.
     """
     if not limits:
-        return
+        return {}
 
     keys = [item.key for item in limits]
     args = [
@@ -137,34 +143,57 @@ async def enforce_rate_limits(
         *args,
     )
 
-    if int(result[0]):
-        return
+    if not int(result[0]):
+        rejected_index = int(result[1]) - 1
+        retry_after = max(1, int(result[2]))
 
-    rejected_index = int(result[1]) - 1
-    retry_after = max(1, int(result[2]))
+        rejected = limits[rejected_index]
+        policy = rejected.policy
+        reset_timestamp = int(time.time()) + retry_after
 
-    rejected = limits[rejected_index]
-    policy = rejected.policy
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Rate limit exceeded. Try again later.",
+                    "policy": policy.name,
+                    "scope": policy.scope,
+                    "limit": policy.limit,
+                    "remaining": 0,
+                    "reset_after_seconds": retry_after,
+                }
+            },
+            headers={
+                "Retry-After": str(retry_after),
+                "X-RateLimit-Limit": str(policy.limit),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(reset_timestamp),
+            },
+        )
 
-    reset_timestamp = int(time.time()) + retry_after
+    # Successful Lua result: [1, 0, 0, count1, ttl1, count2, ttl2, ...]
+    best_index = 0
+    best_remaining = limits[0].policy.limit - int(result[3])
+    best_ratio = best_remaining / limits[0].policy.limit
 
-    raise HTTPException(
-        status_code=429,
-        detail={
-            "error": {
-                "code": "RATE_LIMIT_EXCEEDED",
-                "message": "Rate limit exceeded. Try again later.",
-                "policy": policy.name,
-                "scope": policy.scope,
-                "limit": policy.limit,
-                "remaining": 0,
-                "reset_after_seconds": retry_after,
-            }
-        },
-        headers={
-            "Retry-After": str(retry_after),
-            "X-RateLimit-Limit": str(policy.limit),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": str(reset_timestamp),
-        },
-    )
+    for index, item in enumerate(limits[1:], start=1):
+        result_index = 3 + index * 2
+        count = int(result[result_index])
+        remaining = max(0, item.policy.limit - count)
+        ratio = remaining / item.policy.limit
+
+        if ratio < best_ratio:
+            best_index = index
+            best_remaining = remaining
+            best_ratio = ratio
+
+    selected = limits[best_index]
+    selected_result_index = 3 + best_index * 2
+    ttl = max(1, int(result[selected_result_index + 1]))
+
+    return {
+        "X-RateLimit-Limit": str(selected.policy.limit),
+        "X-RateLimit-Remaining": str(max(0, best_remaining)),
+        "X-RateLimit-Reset": str(int(time.time()) + ttl),
+    }
