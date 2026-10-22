@@ -54,11 +54,18 @@ window.siteData = {
       demoUrl: "/sql-agent"
     },
     {
-      name: "pgmigrate",
-      description: "CLI tool for managing PostgreSQL schema migrations. Supports up/down migrations, dry-run, and rollback.",
-      technologies: ["Go", "PostgreSQL", "CLI", "migrations"],
-      url: "https://github.com/",
+      name: "Mini ASGI Web Framework (Python)",
+      description: "Lightweight ASGI-compliant web framework with async request handling, lifecycle management, decorator-based routing, dynamic parameter injection, exception handling, and flexible response handling.",
+      technologies: ["Python", "ASGI", "AsyncIO", "Web Framework"],
+      url: "https://github.com/v-rana/mini-asgi-framework/tree/develop",
       demoUrl: ""
-    }
+    },
+    {
+  name: "Pattern Atlas",
+  description: "Interactive DSA pattern exploration tool for discovering, visualizing, and analyzing patterns through a web-based interface.",
+  technologies: ["Node.js", "bun", "Web Development"],
+  url: "https://atlas.vranaprojects.site/",
+  demoUrl: "https://atlas.vranaprojects.site/"
+}
   ]
 };
