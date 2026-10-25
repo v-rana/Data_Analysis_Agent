@@ -1,9 +1,11 @@
 import logging
-
-from pydantic_settings import BaseSettings
-from pydantic import computed_field, field_validator
+from datetime import timedelta
+from enum import Enum
 from typing import Literal
 from urllib.parse import quote_plus
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import computed_field, field_validator, Field
 
 logging.basicConfig(level=logging.INFO)
 
@@ -14,15 +16,6 @@ class Settings(BaseSettings):
     REDIS_SESSION_TTL: int = 7
     REDIS_SESSION_TTL_UNIT: Literal[
         "seconds","minutes","hours","days",] = "days"
-    SESSION_CREATE_RATE_LIMIT: int = 3
-    SESSION_CREATE_RATE_WINDOW_SECONDS: int = 3600
-
-    AGENT_SESSION_RATE_LIMIT_PER_MINUTE: int = 3
-    AGENT_SESSION_RATE_LIMIT_PER_DAY: int = 10
-    AGENT_IP_RATE_LIMIT_PER_HOUR: int = 10
-    AGENT_SESSION_RATE_WINDOW_SECONDS: int = 60
-    AGENT_SESSION_DAY_WINDOW_SECONDS: int = 86400
-    AGENT_IP_RATE_WINDOW_SECONDS: int = 3600
     
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
@@ -86,5 +79,51 @@ class Settings(BaseSettings):
         ]
     class Config:
         env_file = ".env"
+
+
+class DurationUnit(str, Enum):
+    SECOND = "second"
+    MINUTE = "minute"
+    HOUR = "hour"
+    DAY = "day"
+
+
+class RateLimitSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="RATE_LIMIT_",
+        extra="ignore",
+    )
+
+    # Session creation: per IP
+    SESSION_CREATE_PER_IP_LIMIT: int = Field(default=3, gt=0)
+    SESSION_CREATE_PER_IP_WINDOW_COUNT: int = Field(default=1, gt=0)
+    SESSION_CREATE_PER_IP_WINDOW_UNIT: DurationUnit = DurationUnit.HOUR
+
+    # Agent requests: per session, burst limit
+    AGENT_PER_SESSION_BURST_LIMIT: int = Field(default=3, gt=0)
+    AGENT_PER_SESSION_BURST_WINDOW_COUNT: int = Field(default=1, gt=0)
+    AGENT_PER_SESSION_BURST_WINDOW_UNIT: DurationUnit = DurationUnit.MINUTE
+
+    # Agent requests: per session, daily limit
+    AGENT_PER_SESSION_LIMIT: int = Field(default=10, gt=0)
+    AGENT_PER_SESSION_WINDOW_COUNT: int = Field(default=1, gt=0)
+    AGENT_PER_SESSION_WINDOW_UNIT: DurationUnit = DurationUnit.DAY
+
+    # Agent requests: per IP, across all sessions
+    AGENT_PER_IP_LIMIT: int = Field(default=10, gt=0)
+    AGENT_PER_IP_WINDOW_COUNT: int = Field(default=1, gt=0)
+    AGENT_PER_IP_WINDOW_UNIT: DurationUnit = DurationUnit.DAY
+
+    @staticmethod
+    def duration_to_seconds(
+        count: int,
+        unit: DurationUnit,
+    ) -> int:
+        duration = timedelta(**{f"{unit.value}s": count})
+        return int(duration.total_seconds())
+
+
+rate_limit_settings = RateLimitSettings()
 
 settings = Settings()

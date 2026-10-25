@@ -5,7 +5,7 @@ import time
 from fastapi import HTTPException
 from redis.asyncio import Redis
 
-from config import settings
+from config import rate_limit_settings
 
 
 @dataclass(frozen=True)
@@ -37,33 +37,44 @@ RATE_LIMIT_POLICIES = {
     "session_create_per_ip": RateLimitPolicy(
         name="session_create_per_ip",
         scope="ip",
-        period="session_create_hour",
-        limit=settings.SESSION_CREATE_RATE_LIMIT,
-        window_seconds=settings.SESSION_CREATE_RATE_WINDOW_SECONDS,
+        period="session_create",
+        limit=rate_limit_settings.SESSION_CREATE_PER_IP_LIMIT,
+        window_seconds=rate_limit_settings.duration_to_seconds(
+            rate_limit_settings.SESSION_CREATE_PER_IP_WINDOW_COUNT,
+            rate_limit_settings.SESSION_CREATE_PER_IP_WINDOW_UNIT,
+        ),
     ),
     "agent_per_session_minute": RateLimitPolicy(
         name="agent_per_session_minute",
         scope="session",
-        period="minute",
-        limit=settings.AGENT_SESSION_RATE_LIMIT_PER_MINUTE,
-        window_seconds=settings.AGENT_SESSION_RATE_WINDOW_SECONDS,
+        period="burst",
+        limit=rate_limit_settings.AGENT_PER_SESSION_BURST_LIMIT,
+        window_seconds=rate_limit_settings.duration_to_seconds(
+            rate_limit_settings.AGENT_PER_SESSION_BURST_WINDOW_COUNT,
+            rate_limit_settings.AGENT_PER_SESSION_BURST_WINDOW_UNIT,
+        ),
     ),
     "agent_per_session_day": RateLimitPolicy(
         name="agent_per_session_day",
         scope="session",
-        period="day",
-        limit=settings.AGENT_SESSION_RATE_LIMIT_PER_DAY,
-        window_seconds=settings.AGENT_SESSION_DAY_WINDOW_SECONDS,
+        period="daily",
+        limit=rate_limit_settings.AGENT_PER_SESSION_LIMIT,
+        window_seconds=rate_limit_settings.duration_to_seconds(
+            rate_limit_settings.AGENT_PER_SESSION_WINDOW_COUNT,
+            rate_limit_settings.AGENT_PER_SESSION_WINDOW_UNIT,
+        ),
     ),
-    "agent_per_ip_hour": RateLimitPolicy(
-        name="agent_per_ip_hour",
+    "agent_per_ip_day": RateLimitPolicy(
+        name="agent_per_ip_day",
         scope="ip",
-        period="agent_hour",
-        limit=settings.AGENT_IP_RATE_LIMIT_PER_HOUR,
-        window_seconds=settings.AGENT_IP_RATE_WINDOW_SECONDS,
+        period="daily",
+        limit=rate_limit_settings.AGENT_PER_IP_LIMIT,
+        window_seconds=rate_limit_settings.duration_to_seconds(
+            rate_limit_settings.AGENT_PER_IP_WINDOW_COUNT,
+            rate_limit_settings.AGENT_PER_IP_WINDOW_UNIT,
+        ),
     ),
 }
-
 
 RATE_LIMIT_SCRIPT = """
 for i = 1, #KEYS do

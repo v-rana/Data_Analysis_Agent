@@ -103,7 +103,7 @@ async def enforce_agent_rate_limits(
         [
             policy_limit("agent_per_session_minute", session_id),
             policy_limit("agent_per_session_day", session_id),
-            policy_limit("agent_per_ip_hour", client_ip),
+            policy_limit("agent_per_ip_day", client_ip),
         ],
     )
 
